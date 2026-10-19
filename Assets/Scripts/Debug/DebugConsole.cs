@@ -5,6 +5,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Text;
+using ScreamJam.Audio;
+using ScreamJam.Utility;
 using UnityEngine;
 
 namespace ScreamJam.Debugging
@@ -25,9 +27,21 @@ namespace ScreamJam.Debugging
         private const int CameraRequestedFps = 30;
         private const float CameraStartTimeoutSeconds = 8f;
         private const float CameraFrameTimeoutSeconds = 3f;
+        private const int MotionGridWidth = 32;
+        private const int MotionGridHeight = 18;
+        private const float CameraFrameWaitTimeoutSeconds = 1f;
 
         /// <summary>Default delay between starting the camera and capturing, in seconds.</summary>
         public static float CameraCaptureDelaySeconds = 2f;
+
+        /// <summary>Warm-up time after the first valid camera frame before taking the reference sample.</summary>
+        public static float CameraMotionWarmupSeconds = 1f;
+
+        /// <summary>Delay between the reference sample and the comparison sample, in seconds.</summary>
+        public static float CameraMotionCheckDelaySeconds = 0.3f;
+
+        /// <summary>Mean absolute luma difference (0-255) required to consider the camera live.</summary>
+        public static float CameraMotionThreshold = 0.5f;
 
         private static DebugConsole _instance;
         private static readonly ConcurrentQueue<LogEntry> Pending = new ConcurrentQueue<LogEntry>();
@@ -49,8 +63,13 @@ namespace ScreamJam.Debugging
 
         private bool _cameraBusy;
         private WebCamTexture _cameraTexture;
+        private Color32[] _cameraFrameBuffer;
+        private float[] _cameraMotionBaseline;
         private Texture2D _photoTexture;
         private bool _showPhoto;
+        private string _previewTitle = "Last photo";
+        private bool _showMicLevel;
+        private MicrophoneLevelService.MicStartPhase _lastMicStartPhase = MicrophoneLevelService.MicStartPhase.Idle;
 
         private bool _previousCursorVisible;
         private CursorLockMode _previousCursorLock;
@@ -86,8 +105,15 @@ namespace ScreamJam.Debugging
             _font = CreateFont();
 
             RegisterCommand("help", "/help", "List all available commands.", _ => PrintHelp());
-            RegisterCommand("camera", "/camera [seconds]", "Open the camera, capture a photo after a delay, then close it.", BeginCameraCapture);
+            RegisterCommand("camera", "/camera [seconds]", "Open the camera, verify it produces changing frames, capture a photo after a delay, then close it.", BeginCameraCapture);
             RegisterCommand("photo", "/photo", "Show the last photo taken with /camera.", _ => ShowLastPhoto());
+            RegisterCommand("miclevel", "/miclevel", "Toggle the live microphone level display.", _ => ToggleMicLevelDisplay());
+            RegisterCommand("micstart", "/micstart [stop]", "Record a 15s baseline, then detect a sustained loud level.", BeginMicStart);
+            RegisterCommand("clipboard", "/clipboard", "Print the current clipboard text.", _ => PrintClipboard());
+            RegisterCommand("screenshot", "/screenshot [show]", "Capture the full desktop, or show the last screenshot.", HandleScreenshot);
+            RegisterCommand("record", "/record [play]", "Record 10s of microphone audio, or play the last recording.", HandleRecord);
+            RegisterCommand("tempclear", "/tempclear", "Delete cached photos, screenshots, and recordings.", _ => ClearCachedFiles());
+            RegisterCommand("quit", "/quit", "Quit the game.", _ => QuitGame());
         }
 
         private void OnDestroy()
@@ -130,6 +156,7 @@ namespace ScreamJam.Debugging
             if (_open)
                 HandleConsoleKeys();
 
+            CheckMicStartVerdict();
             DrainPending();
         }
 
@@ -323,6 +350,9 @@ namespace ScreamJam.Debugging
 
             GUILayout.EndHorizontal();
 
+            if (_showMicLevel)
+                DrawMicLevel();
+
             if (_showPhoto && _photoTexture != null)
                 DrawPhotoPreview();
 
@@ -462,6 +492,62 @@ namespace ScreamJam.Debugging
             AddCommandLine("Press Enter to run a command. Commands are case-insensitive.");
         }
 
+        private void PrintClipboard()
+        {
+            string text;
+
+            try
+            {
+                text = GUIUtility.systemCopyBuffer;
+            }
+            catch (Exception ex)
+            {
+                AddCommandLine("Failed to read clipboard: " + ex.Message, LogType.Error);
+                return;
+            }
+
+            if (string.IsNullOrEmpty(text))
+            {
+                AddCommandLine("Clipboard is empty.", LogType.Warning);
+                return;
+            }
+
+            int length = text.Length;
+            const int maxLength = 8000;
+
+            if (text.Length > maxLength)
+            {
+                text = text.Substring(0, maxLength) +
+                       "\n... (truncated, " + length + " chars total)";
+            }
+
+            AddCommandLine("Clipboard (" + length + " chars):");
+            AddCommandLine(text);
+        }
+
+        private void CheckMicStartVerdict()
+        {
+            MicrophoneLevelService service = MicrophoneLevelService.Instance;
+            if (service == null)
+                return;
+
+            MicrophoneLevelService.MicStartPhase phase = service.CurrentMicStartPhase;
+            if (phase == _lastMicStartPhase)
+                return;
+
+            _lastMicStartPhase = phase;
+
+            if (phase == MicrophoneLevelService.MicStartPhase.Loud)
+            {
+                AddCommandLine(
+                    "MICSTART verdict: LOUD (current " +
+                    service.RmsDb.ToString("0.0", CultureInfo.InvariantCulture) +
+                    " dBFS, baseline " +
+                    service.MicStartBaselineDb.ToString("0.0", CultureInfo.InvariantCulture) +
+                    " dBFS).");
+            }
+        }
+
         private void AddCommandLine(string message, LogType type = LogType.Log)
         {
             AddEntry(new LogEntry
@@ -556,8 +642,6 @@ namespace ScreamJam.Debugging
                 AddCommandLine("Camera on. Capturing in " + delay.ToString("0.##", CultureInfo.InvariantCulture) + "s...");
 
                 float captureTime = Time.realtimeSinceStartup + delay;
-                while (Time.realtimeSinceStartup < captureTime)
-                    yield return null;
 
                 float readyDeadline = Time.realtimeSinceStartup + CameraStartTimeoutSeconds;
                 while (_cameraTexture.width <= 16 || !_cameraTexture.didUpdateThisFrame)
@@ -570,6 +654,114 @@ namespace ScreamJam.Debugging
 
                     yield return null;
                 }
+
+                int width = _cameraTexture.width;
+                int height = _cameraTexture.height;
+
+                if (_cameraFrameBuffer == null || _cameraFrameBuffer.Length != width * height)
+                    _cameraFrameBuffer = new Color32[width * height];
+
+                float warmup = Mathf.Clamp(CameraMotionWarmupSeconds, 0f, 10f);
+                float warmupEnd = Time.realtimeSinceStartup + warmup;
+                while (Time.realtimeSinceStartup < warmupEnd)
+                    yield return null;
+
+                bool gotReferenceFrame = false;
+                float referenceDeadline = Time.realtimeSinceStartup + CameraFrameWaitTimeoutSeconds;
+                while (Time.realtimeSinceStartup < referenceDeadline)
+                {
+                    if (_cameraTexture.didUpdateThisFrame)
+                    {
+                        gotReferenceFrame = true;
+                        break;
+                    }
+
+                    yield return null;
+                }
+
+                if (!gotReferenceFrame)
+                {
+                    AddCommandLine(
+                        "Camera invalid: no frame after " +
+                        warmup.ToString("0.##", CultureInfo.InvariantCulture) +
+                        "s warm-up (timeout " + CameraFrameWaitTimeoutSeconds.ToString("0.##", CultureInfo.InvariantCulture) + "s).",
+                        LogType.Error);
+
+                    yield break;
+                }
+
+                if (!TryReadFrame(_cameraTexture, _cameraFrameBuffer, out string baselineError))
+                {
+                    AddCommandLine("Failed to read camera frame: " + baselineError, LogType.Error);
+                    yield break;
+                }
+
+                _cameraMotionBaseline = new float[MotionGridWidth * MotionGridHeight];
+                SampleLumaGrid(_cameraFrameBuffer, width, height, _cameraMotionBaseline);
+
+                float checkDelay = Mathf.Clamp(CameraMotionCheckDelaySeconds, 0.05f, 5f);
+                float motionThreshold = Mathf.Max(0.01f, CameraMotionThreshold);
+
+                // Compare the reference sample with a frame captured after the delay.
+                float checkTime = Time.realtimeSinceStartup + checkDelay;
+                while (Time.realtimeSinceStartup < checkTime)
+                    yield return null;
+
+                bool gotComparisonFrame = false;
+                float comparisonDeadline = Time.realtimeSinceStartup + CameraFrameWaitTimeoutSeconds;
+                while (Time.realtimeSinceStartup < comparisonDeadline)
+                {
+                    if (_cameraTexture.didUpdateThisFrame)
+                    {
+                        gotComparisonFrame = true;
+                        break;
+                    }
+
+                    yield return null;
+                }
+
+                if (!gotComparisonFrame)
+                {
+                    AddCommandLine(
+                        "Camera invalid: no new frame after " +
+                        checkDelay.ToString("0.##", CultureInfo.InvariantCulture) +
+                        "s (timeout " + CameraFrameWaitTimeoutSeconds.ToString("0.##", CultureInfo.InvariantCulture) + "s).",
+                        LogType.Error);
+
+                    yield break;
+                }
+
+                if (!TryReadFrame(_cameraTexture, _cameraFrameBuffer, out string sampleError))
+                {
+                    AddCommandLine("Failed to read camera frame: " + sampleError, LogType.Error);
+                    yield break;
+                }
+
+                float difference = ComputeLumaDifference(
+                    _cameraFrameBuffer,
+                    width,
+                    height,
+                    _cameraMotionBaseline);
+
+                if (difference < motionThreshold)
+                {
+                    AddCommandLine(
+                        "Camera invalid: no pixel change detected in " +
+                        checkDelay.ToString("0.##", CultureInfo.InvariantCulture) +
+                        "s (diff " + difference.ToString("0.###", CultureInfo.InvariantCulture) +
+                        ", threshold " + motionThreshold.ToString("0.###", CultureInfo.InvariantCulture) + ").",
+                        LogType.Error);
+
+                    yield break;
+                }
+
+                AddCommandLine(
+                    "Camera valid (pixel diff " +
+                    difference.ToString("0.###", CultureInfo.InvariantCulture) +
+                    ", threshold " + motionThreshold.ToString("0.###", CultureInfo.InvariantCulture) + ").");
+
+                while (Time.realtimeSinceStartup < captureTime)
+                    yield return null;
 
                 bool freshFrame = false;
                 float frameDeadline = Time.realtimeSinceStartup + CameraFrameTimeoutSeconds;
@@ -614,6 +806,8 @@ namespace ScreamJam.Debugging
             finally
             {
                 StopCamera();
+                _cameraFrameBuffer = null;
+                _cameraMotionBaseline = null;
                 _cameraBusy = false;
             }
         }
@@ -648,12 +842,95 @@ namespace ScreamJam.Debugging
             }
         }
 
+        private static bool TryReadFrame(WebCamTexture source, Color32[] buffer, out string error)
+        {
+            try
+            {
+                source.GetPixels32(buffer);
+                error = null;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return false;
+            }
+        }
+
+        private static void SampleLumaGrid(Color32[] pixels, int width, int height, float[] target)
+        {
+            for (int gy = 0; gy < MotionGridHeight; gy++)
+            {
+                int y = MotionGridHeight <= 1
+                    ? 0
+                    : (gy * (height - 1)) / (MotionGridHeight - 1);
+
+                for (int gx = 0; gx < MotionGridWidth; gx++)
+                {
+                    int x = MotionGridWidth <= 1
+                        ? 0
+                        : (gx * (width - 1)) / (MotionGridWidth - 1);
+
+                    target[gy * MotionGridWidth + gx] = Luma(pixels[y * width + x]);
+                }
+            }
+        }
+
+        private static float ComputeLumaDifference(
+            Color32[] pixels,
+            int width,
+            int height,
+            float[] baseline)
+        {
+            float sum = 0f;
+
+            for (int gy = 0; gy < MotionGridHeight; gy++)
+            {
+                int y = MotionGridHeight <= 1
+                    ? 0
+                    : (gy * (height - 1)) / (MotionGridHeight - 1);
+
+                for (int gx = 0; gx < MotionGridWidth; gx++)
+                {
+                    int x = MotionGridWidth <= 1
+                        ? 0
+                        : (gx * (width - 1)) / (MotionGridWidth - 1);
+
+                    float difference = Luma(pixels[y * width + x]) - baseline[gy * MotionGridWidth + gx];
+                    sum += Mathf.Abs(difference);
+                }
+            }
+
+            return sum / (MotionGridWidth * MotionGridHeight);
+        }
+
+        private static float Luma(Color32 color)
+        {
+            return 0.299f * color.r + 0.587f * color.g + 0.114f * color.b;
+        }
+
         private void ShowLastPhoto()
         {
-            if (!File.Exists(PhotoPath))
+            ShowImagePreview(
+                PhotoPath,
+                "Last photo",
+                "No photo found. Run /camera first.");
+        }
+
+        private void ShowLastScreenshot()
+        {
+            ShowImagePreview(
+                DesktopScreenshotService.ScreenshotPath,
+                "Last screenshot",
+                "No screenshot found. Run /screenshot first.");
+        }
+
+        private void ShowImagePreview(string path, string title, string missingMessage)
+        {
+            if (!File.Exists(path))
             {
                 _showPhoto = false;
-                AddCommandLine("No photo found. Run /camera first.", LogType.Warning);
+                AddCommandLine(missingMessage, LogType.Warning);
                 return;
             }
 
@@ -661,12 +938,12 @@ namespace ScreamJam.Debugging
 
             try
             {
-                bytes = File.ReadAllBytes(PhotoPath);
+                bytes = File.ReadAllBytes(path);
             }
             catch (Exception ex)
             {
                 _showPhoto = false;
-                AddCommandLine("Failed to read photo: " + ex.Message, LogType.Error);
+                AddCommandLine("Failed to read image: " + ex.Message, LogType.Error);
                 return;
             }
 
@@ -686,7 +963,7 @@ namespace ScreamJam.Debugging
             {
                 Destroy(texture);
                 _showPhoto = false;
-                AddCommandLine("Failed to load photo.", LogType.Error);
+                AddCommandLine("Failed to load image.", LogType.Error);
                 return;
             }
 
@@ -694,8 +971,249 @@ namespace ScreamJam.Debugging
                 Destroy(_photoTexture);
 
             _photoTexture = texture;
+            _previewTitle = title;
             _showPhoto = true;
-            AddCommandLine("Showing last photo.");
+            AddCommandLine(title + " displayed.");
+        }
+
+        private void HandleScreenshot(string[] args)
+        {
+            if (args.Length > 0)
+            {
+                if (string.Equals(args[0], "show", StringComparison.OrdinalIgnoreCase))
+                {
+                    ShowLastScreenshot();
+                    return;
+                }
+
+                AddCommandLine("Usage: /screenshot [show]", LogType.Warning);
+                return;
+            }
+
+            if (DesktopScreenshotService.TryCaptureAndSave(out bool fullDesktop, out string error))
+            {
+                AddCommandLine(fullDesktop
+                    ? "Screenshot captured and saved."
+                    : "Screenshot captured (game view only).");
+            }
+            else
+            {
+                AddCommandLine("Failed to capture screenshot: " + error, LogType.Error);
+            }
+        }
+
+        private void HandleRecord(string[] args)
+        {
+            MicrophoneLevelService service = MicrophoneLevelService.Instance;
+            if (service == null)
+            {
+                AddCommandLine("Microphone service unavailable.", LogType.Error);
+                return;
+            }
+
+            if (args.Length > 0)
+            {
+                if (string.Equals(args[0], "play", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (service.IsRecording)
+                    {
+                        AddCommandLine("Recording is in progress.", LogType.Warning);
+                        return;
+                    }
+
+                    if (!service.HasRecording)
+                    {
+                        AddCommandLine("No recording found. Run /record first.", LogType.Warning);
+                        return;
+                    }
+
+                    if (service.TryPlayLastRecording(out string error))
+                        AddCommandLine("Playing last recording.");
+                    else
+                        AddCommandLine("Failed to play recording: " + error, LogType.Error);
+
+                    return;
+                }
+
+                AddCommandLine("Usage: /record [play]", LogType.Warning);
+                return;
+            }
+
+            if (!service.IsRunning)
+            {
+                AddCommandLine("Microphone unavailable: " + service.Status, LogType.Error);
+                return;
+            }
+
+            if (!service.StartRecording(MicrophoneLevelService.RecordSeconds))
+            {
+                AddCommandLine(
+                    service.IsRecording
+                        ? "Recording is already in progress."
+                        : "Failed to start recording.",
+                    LogType.Warning);
+                return;
+            }
+
+            AddCommandLine(
+                "Recording started. Capturing " +
+                MicrophoneLevelService.RecordSeconds.ToString("0.#", CultureInfo.InvariantCulture) +
+                "s...");
+        }
+
+        private void ClearCachedFiles()
+        {
+            if (_photoTexture != null)
+            {
+                Destroy(_photoTexture);
+                _photoTexture = null;
+            }
+
+            _showPhoto = false;
+
+            MicrophoneLevelService mic = MicrophoneLevelService.Instance;
+            if (mic != null)
+                mic.ClearRecordingCache();
+
+            string[] directories =
+            {
+                Path.Combine(Application.persistentDataPath, "Photos"),
+                DesktopScreenshotService.ScreenshotDirectory,
+                MicrophoneLevelService.RecordingsDirectory
+            };
+
+            bool clearedAny = false;
+            string error = null;
+
+            for (int i = 0; i < directories.Length; i++)
+                clearedAny |= TryDeleteCacheDirectory(directories[i], ref error);
+
+            if (!string.IsNullOrEmpty(error))
+                AddCommandLine("Cache clear warning: " + error, LogType.Warning);
+
+            if (clearedAny)
+                AddCommandLine("Cache cleared.");
+            else
+                AddCommandLine("No cached files found.", LogType.Warning);
+        }
+
+        private void QuitGame()
+        {
+            AddCommandLine("Quitting...");
+
+#if UNITY_EDITOR
+            UnityEditor.EditorApplication.isPlaying = false;
+#else
+            Application.Quit();
+#endif
+        }
+
+        private static bool TryDeleteCacheDirectory(string directory, ref string error)
+        {
+            try
+            {
+                if (!Directory.Exists(directory))
+                    return false;
+
+                Directory.Delete(directory, true);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = string.IsNullOrEmpty(error)
+                    ? ex.Message
+                    : error + "; " + ex.Message;
+                return false;
+            }
+        }
+
+        private void ToggleMicLevelDisplay()
+        {
+            _showMicLevel = !_showMicLevel;
+            AddCommandLine(_showMicLevel
+                ? "Microphone level display on."
+                : "Microphone level display off.");
+        }
+
+        private void BeginMicStart(string[] args)
+        {
+            MicrophoneLevelService service = MicrophoneLevelService.Instance;
+            if (service == null)
+            {
+                AddCommandLine("Microphone service unavailable.", LogType.Error);
+                return;
+            }
+
+            if (args.Length > 0 && string.Equals(args[0], "stop", StringComparison.OrdinalIgnoreCase))
+            {
+                service.StopMicStartEvent();
+                AddCommandLine("MICSTART stopped.");
+                return;
+            }
+
+            if (!service.IsRunning)
+            {
+                AddCommandLine("Microphone unavailable: " + service.Status, LogType.Error);
+                return;
+            }
+
+            if (!service.StartMicStartEvent())
+            {
+                AddCommandLine("MICSTART is already running. Use /micstart stop to cancel.", LogType.Warning);
+                return;
+            }
+
+            AddCommandLine(
+                "MICSTART started. Recording a " +
+                MicrophoneLevelService.MicStartBaselineSeconds.ToString("0.#", CultureInfo.InvariantCulture) +
+                "s baseline (limit " +
+                MicrophoneLevelService.MicStartTimeoutSeconds.ToString("0.#", CultureInfo.InvariantCulture) +
+                "s)...");
+        }
+
+        private void DrawMicLevel()
+        {
+            MicrophoneLevelService service = MicrophoneLevelService.Instance;
+            string text;
+            Color color;
+
+            if (service == null)
+            {
+                text = "Mic: service unavailable.";
+                color = new Color(1f, 0.45f, 0.45f, 1f);
+            }
+            else if (!service.IsRunning)
+            {
+                text = "Mic: " + service.Status;
+                color = new Color(1f, 0.45f, 0.45f, 1f);
+            }
+            else if (!service.HasSample)
+            {
+                text = "Mic: starting... (" + service.DeviceName + ")";
+                color = new Color(1f, 0.85f, 0.35f, 1f);
+            }
+            else
+            {
+                const int barCount = 24;
+                float db = Mathf.Clamp(service.RmsDb, -60f, 0f);
+                int filled = Mathf.Clamp(
+                    Mathf.RoundToInt(Mathf.InverseLerp(-60f, 0f, db) * barCount),
+                    0,
+                    barCount);
+                string bar = new string('#', filled) + new string('.', barCount - filled);
+
+                text = "Mic [" + bar + "] " +
+                       service.RmsDb.ToString("0.0", CultureInfo.InvariantCulture) + " dBFS  peak " +
+                       service.PeakDb.ToString("0.0", CultureInfo.InvariantCulture) + " dB  " +
+                       service.DeviceName;
+
+                color = new Color(0.55f, 0.9f, 1f, 1f);
+            }
+
+            Color previous = GUI.contentColor;
+            GUI.contentColor = color;
+            GUILayout.Label(text, _logStyle);
+            GUI.contentColor = previous;
         }
 
         private void DrawPhotoPreview()
@@ -703,7 +1221,7 @@ namespace ScreamJam.Debugging
             GUILayout.BeginVertical(GUI.skin.box);
 
             GUILayout.BeginHorizontal();
-            GUILayout.Label("Last photo", _titleStyle);
+            GUILayout.Label(_previewTitle, _titleStyle);
             GUILayout.FlexibleSpace();
 
             if (GUILayout.Button("Hide", GUILayout.Width(50f), GUILayout.Height(20f)))

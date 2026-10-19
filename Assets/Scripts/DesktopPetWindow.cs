@@ -34,11 +34,16 @@ public class DesktopPetWindow : MonoBehaviour
     const int WsExWindowEdge = 0x00000100;
     const int WsExClientEdge = 0x00000200;
     const int WsExStaticEdge = 0x00020000;
+    const int WsExToolWindow = 0x00000080;
+    const int WsExAppWindow = 0x00040000;
 
     const uint SwpNoSize = 0x0001;
     const uint SwpNoMove = 0x0002;
     const uint SwpFrameChanged = 0x0020;
     const uint SwpShowWindow = 0x0040;
+
+    const int SwHide = 0;
+    const int SwShowNoActivate = 4;
 
     const int WmNcLButtonDown = 0x00A1;
     const uint WmNcHitTest = 0x0084;
@@ -287,7 +292,8 @@ public class DesktopPetWindow : MonoBehaviour
         SetWindowLong(hwnd, GwlStyle, style);
 
         int exStyle = GetWindowLong(hwnd, GwlExStyle);
-        exStyle &= ~(WsExDlgModalFrame | WsExWindowEdge | WsExClientEdge | WsExStaticEdge);
+        exStyle &= ~(WsExDlgModalFrame | WsExWindowEdge | WsExClientEdge | WsExStaticEdge | WsExAppWindow);
+        exStyle |= WsExToolWindow;
         SetWindowLong(hwnd, GwlExStyle, exStyle);
 
         var margins = new Margins
@@ -298,6 +304,13 @@ public class DesktopPetWindow : MonoBehaviour
             cyBottomHeight = -1
         };
         DwmExtendFrameIntoClientArea(hwnd, ref margins);
+
+        if (placeOnScreen)
+        {
+            // Force the shell to refresh the taskbar button after applying the tool-window style.
+            ShowWindow(hwnd, SwHide);
+            ShowWindow(hwnd, SwShowNoActivate);
+        }
 
         IntPtr zOrder = alwaysOnTop ? HwndTopMost : HwndNoTopMost;
         if (!placeOnScreen)
@@ -585,6 +598,9 @@ public class DesktopPetWindow : MonoBehaviour
 
     [DllImport("user32.dll")]
     static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
+
+    [DllImport("user32.dll")]
+    static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
     [DllImport("user32.dll")]
     static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
