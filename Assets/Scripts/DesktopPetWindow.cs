@@ -18,6 +18,7 @@ public class DesktopPetWindow : MonoBehaviour
     [SerializeField] int screenMargin = 24;
     [SerializeField] bool showPlaceholder = true;
     [SerializeField] float clickAlphaThreshold = 0.2f;
+    [SerializeField] float dragThresholdPixels = 36f;
 
     const int GwlStyle = -16;
     const int GwlExStyle = -20;
@@ -79,6 +80,8 @@ public class DesktopPetWindow : MonoBehaviour
     static bool dragging;
 
     IntPtr hwnd;
+    bool armDrag;
+    Vector2 dragOrigin;
     bool ready;
     Vector3 camPosition;
     Quaternion camRotation;
@@ -135,16 +138,28 @@ public class DesktopPetWindow : MonoBehaviour
         CacheHitData();
         EnsureHook();
 
-        if (!IsCursorOverVisiblePixel() || IsPointerOverUi())
-            return;
-
-        if (Input.GetMouseButtonDown(0))
+        bool overVisible = IsCursorOverVisiblePixel() && !IsPointerOverUi();
+        if (Input.GetMouseButtonDown(0) && overVisible)
         {
-            dragging = true;
-            ReleaseCapture();
-            SendMessage(hwnd, WmNcLButtonDown, HtCaption, 0);
-            dragging = false;
+            armDrag = true;
+            dragOrigin = Input.mousePosition;
         }
+
+        if (armDrag && Input.GetMouseButton(0))
+        {
+            float threshold = Mathf.Max(1f, dragThresholdPixels);
+            if ((Input.mousePosition - (Vector3)dragOrigin).sqrMagnitude >= threshold * threshold)
+            {
+                armDrag = false;
+                dragging = true;
+                ReleaseCapture();
+                SendMessage(hwnd, WmNcLButtonDown, HtCaption, 0);
+                dragging = false;
+            }
+        }
+
+        if (Input.GetMouseButtonUp(0))
+            armDrag = false;
 #endif
     }
 
