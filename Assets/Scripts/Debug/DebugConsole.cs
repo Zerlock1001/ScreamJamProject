@@ -44,6 +44,8 @@ namespace ScreamJam.Debugging
         private string _input = string.Empty;
         private bool _focusInput;
         private int _openFrame;
+        private int _lastToggleFrame = -1;
+        private float _lastToggleTime = -1f;
 
         private bool _cameraBusy;
         private WebCamTexture _cameraTexture;
@@ -119,13 +121,28 @@ namespace ScreamJam.Debugging
         private void Update()
         {
             // KeyCode.BackQuote is the `~` key on a US keyboard layout.
+            // OnGUI also checks this key, because a focused text field can
+            // swallow the event in some situations. ToggleConsole de-dupes
+            // the two paths so one key press always means one toggle.
             if (Input.GetKeyDown(KeyCode.BackQuote))
-                SetOpen(!_open);
+                ToggleConsole();
 
             if (_open)
                 HandleConsoleKeys();
 
             DrainPending();
+        }
+
+        private void ToggleConsole()
+        {
+            float now = Time.unscaledTime;
+
+            if (_lastToggleFrame == Time.frameCount || now - _lastToggleTime < 0.15f)
+                return;
+
+            _lastToggleFrame = Time.frameCount;
+            _lastToggleTime = now;
+            SetOpen(!_open);
         }
 
         private void HandleConsoleKeys()
@@ -230,6 +247,15 @@ namespace ScreamJam.Debugging
 
         private void OnGUI()
         {
+            // Catch `~` before the command text field can consume it.
+            if (Event.current.type == EventType.KeyDown &&
+                Event.current.keyCode == KeyCode.BackQuote)
+            {
+                ToggleConsole();
+                Event.current.Use();
+                return;
+            }
+
             if (!_open) return;
 
             // Handle Enter before the text field consumes the key event.
