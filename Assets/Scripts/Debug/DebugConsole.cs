@@ -65,9 +65,6 @@ namespace ScreamJam.Debugging
         private WebCamTexture _cameraTexture;
         private Color32[] _cameraFrameBuffer;
         private float[] _cameraMotionBaseline;
-        private Texture2D _photoTexture;
-        private bool _showPhoto;
-        private string _previewTitle = "Last photo";
         private bool _showMicLevel;
         private MicrophoneLevelService.MicStartPhase _lastMicStartPhase = MicrophoneLevelService.MicStartPhase.Idle;
 
@@ -130,12 +127,7 @@ namespace ScreamJam.Debugging
             }
 
             StopCamera();
-
-            if (_photoTexture != null)
-            {
-                Destroy(_photoTexture);
-                _photoTexture = null;
-            }
+            DestroyAllImageEntries();
 
             if (_font != null)
             {
@@ -232,7 +224,6 @@ namespace ScreamJam.Debugging
                 Cursor.lockState = _previousCursorLock;
                 _input = string.Empty;
                 _focusInput = false;
-                _showPhoto = false;
             }
         }
 
@@ -246,7 +237,12 @@ namespace ScreamJam.Debugging
             }
 
             if (_entries.Count > MaxEntries)
-                _entries.RemoveRange(0, _entries.Count - MaxEntries);
+            {
+                int excess = _entries.Count - MaxEntries;
+                for (int i = 0; i < excess; i++)
+                    DestroyImage(_entries[i]);
+                _entries.RemoveRange(0, excess);
+            }
 
             if (drained > 0 && _open && _autoScroll)
                 _scrollToBottom = true;
@@ -353,9 +349,6 @@ namespace ScreamJam.Debugging
             if (_showMicLevel)
                 DrawMicLevel();
 
-            if (_showPhoto && _photoTexture != null)
-                DrawPhotoPreview();
-
             if (_scrollToBottom)
             {
                 _scroll.y = float.MaxValue;
@@ -375,6 +368,9 @@ namespace ScreamJam.Debugging
                     _logStyle);
                 GUI.contentColor = Color.white;
 
+                if (entry.Texture != null)
+                    DrawInlineImage(entry.Texture);
+
                 if (_showStackTraces && !string.IsNullOrEmpty(entry.StackTrace))
                     GUILayout.Label(entry.StackTrace, _stackStyle);
             }
@@ -386,11 +382,60 @@ namespace ScreamJam.Debugging
             GUI.depth = previousDepth;
         }
 
+        private void DrawInlineImage(Texture2D texture)
+        {
+            float maxWidth = Mathf.Max(64f, Screen.width - 48f);
+            float maxHeight = Mathf.Max(64f, Mathf.Min(Screen.height * 0.30f, 360f));
+            float aspect = (float)texture.width / Mathf.Max(1, texture.height);
+            float width = maxWidth;
+            float height = width / Mathf.Max(0.0001f, aspect);
+
+            if (height > maxHeight)
+            {
+                height = maxHeight;
+                width = height * aspect;
+            }
+
+            Rect rect = GUILayoutUtility.GetRect(width, height, GUILayout.ExpandWidth(false));
+            Color previous = GUI.color;
+            GUI.color = Color.white;
+            GUI.DrawTexture(rect, texture, ScaleMode.ScaleToFit, true);
+            GUI.color = previous;
+        }
+
         private void Clear()
         {
+            DestroyAllImageEntries();
             _entries.Clear();
             while (Pending.TryDequeue(out _)) { }
             _scroll = Vector2.zero;
+        }
+
+        private void DestroyAllImageEntries()
+        {
+            for (int i = 0; i < _entries.Count; i++)
+                DestroyImage(_entries[i]);
+        }
+
+        private void RemoveImageEntries()
+        {
+            for (int i = _entries.Count - 1; i >= 0; i--)
+            {
+                if (_entries[i].Texture == null)
+                    continue;
+
+                DestroyImage(_entries[i]);
+                _entries.RemoveAt(i);
+            }
+        }
+
+        private void DestroyImage(LogEntry entry)
+        {
+            if (entry.Texture == null)
+                return;
+
+            Destroy(entry.Texture);
+            entry.Texture = null;
         }
 
         private void CopyAll()
@@ -565,7 +610,12 @@ namespace ScreamJam.Debugging
             _entries.Add(entry);
 
             if (_entries.Count > MaxEntries)
-                _entries.RemoveRange(0, _entries.Count - MaxEntries);
+            {
+                int excess = _entries.Count - MaxEntries;
+                for (int i = 0; i < excess; i++)
+                    DestroyImage(_entries[i]);
+                _entries.RemoveRange(0, excess);
+            }
 
             if (_open && _autoScroll)
                 _scrollToBottom = true;
@@ -911,7 +961,7 @@ namespace ScreamJam.Debugging
 
         private void ShowLastPhoto()
         {
-            ShowImagePreview(
+            ShowImageInConsole(
                 PhotoPath,
                 "Last photo",
                 "No photo found. Run /camera first.");
@@ -919,17 +969,16 @@ namespace ScreamJam.Debugging
 
         private void ShowLastScreenshot()
         {
-            ShowImagePreview(
+            ShowImageInConsole(
                 DesktopScreenshotService.ScreenshotPath,
                 "Last screenshot",
                 "No screenshot found. Run /screenshot first.");
         }
 
-        private void ShowImagePreview(string path, string title, string missingMessage)
+        private void ShowImageInConsole(string path, string title, string missingMessage)
         {
             if (!File.Exists(path))
             {
-                _showPhoto = false;
                 AddCommandLine(missingMessage, LogType.Warning);
                 return;
             }
@@ -942,7 +991,6 @@ namespace ScreamJam.Debugging
             }
             catch (Exception ex)
             {
-                _showPhoto = false;
                 AddCommandLine("Failed to read image: " + ex.Message, LogType.Error);
                 return;
             }
@@ -962,18 +1010,35 @@ namespace ScreamJam.Debugging
             if (!loaded)
             {
                 Destroy(texture);
-                _showPhoto = false;
                 AddCommandLine("Failed to load image.", LogType.Error);
                 return;
             }
 
-            if (_photoTexture != null)
-                Destroy(_photoTexture);
+            AddImageEntry(title, texture);
+        }
 
-            _photoTexture = texture;
-            _previewTitle = title;
-            _showPhoto = true;
-            AddCommandLine(title + " displayed.");
+        private void AddImageEntry(string title, Texture2D texture)
+        {
+            for (int i = _entries.Count - 1; i >= 0; i--)
+            {
+                if (_entries[i].Texture == null)
+                    continue;
+
+                DestroyImage(_entries[i]);
+                _entries.RemoveAt(i);
+            }
+
+            AddEntry(new LogEntry
+            {
+                Time = DateTime.Now,
+                Message = title,
+                StackTrace = null,
+                Type = LogType.Log,
+                IsCommand = true,
+                Texture = texture
+            });
+
+            _scrollToBottom = true;
         }
 
         private void HandleScreenshot(string[] args)
@@ -1063,13 +1128,7 @@ namespace ScreamJam.Debugging
 
         private void ClearCachedFiles()
         {
-            if (_photoTexture != null)
-            {
-                Destroy(_photoTexture);
-                _photoTexture = null;
-            }
-
-            _showPhoto = false;
+            RemoveImageEntries();
 
             MicrophoneLevelService mic = MicrophoneLevelService.Instance;
             if (mic != null)
@@ -1214,37 +1273,6 @@ namespace ScreamJam.Debugging
             GUI.contentColor = color;
             GUILayout.Label(text, _logStyle);
             GUI.contentColor = previous;
-        }
-
-        private void DrawPhotoPreview()
-        {
-            GUILayout.BeginVertical(GUI.skin.box);
-
-            GUILayout.BeginHorizontal();
-            GUILayout.Label(_previewTitle, _titleStyle);
-            GUILayout.FlexibleSpace();
-
-            if (GUILayout.Button("Hide", GUILayout.Width(50f), GUILayout.Height(20f)))
-                _showPhoto = false;
-
-            GUILayout.EndHorizontal();
-
-            float maxWidth = Mathf.Max(64f, Screen.width - 48f);
-            float maxHeight = Mathf.Max(48f, Mathf.Min(Screen.height * 0.28f, 320f));
-            float aspect = (float)_photoTexture.width / Mathf.Max(1, _photoTexture.height);
-            float width = maxWidth;
-            float height = width / Mathf.Max(0.0001f, aspect);
-
-            if (height > maxHeight)
-            {
-                height = maxHeight;
-                width = height * aspect;
-            }
-
-            Rect photoRect = GUILayoutUtility.GetRect(width, height, GUILayout.ExpandWidth(false));
-            GUI.DrawTexture(photoRect, _photoTexture, ScaleMode.ScaleToFit, true);
-
-            GUILayout.EndVertical();
         }
 
         private static string PickCameraDevice()
@@ -1480,6 +1508,7 @@ namespace ScreamJam.Debugging
             public string StackTrace;
             public LogType Type;
             public bool IsCommand;
+            public Texture2D Texture;
         }
 
         private sealed class ConsoleCommand
