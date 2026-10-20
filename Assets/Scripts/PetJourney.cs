@@ -5,7 +5,7 @@ using UnityEngine.UI;
 
 /// <summary>
 /// 远行：角色缩小离开，一段时间后回来，带回占位 meme。
-/// 第一次离开 1 分钟，之后每次多 1 分钟。
+/// 第一次离开 30 秒，之后每次多 1 分钟。
 /// </summary>
 public class PetJourney : MonoBehaviour
 {
@@ -18,8 +18,9 @@ public class PetJourney : MonoBehaviour
 
     [SerializeField] SpriteRenderer pet;
     [SerializeField] Button journeyButton;
+    [SerializeField] Image moodFill;
     [SerializeField] float shrinkSeconds = 1.2f;
-    [SerializeField] float firstTripSeconds = 60f;
+    [SerializeField] float firstTripSeconds = 30f;
     [SerializeField] float extraSecondsPerTrip = 60f;
     [SerializeField] float moodRecoverSeconds = 60f;
     [SerializeField] float newsDelaySeconds = 30f;
@@ -28,6 +29,7 @@ public class PetJourney : MonoBehaviour
     [SerializeField] string newsLine = "Today's news";
     [SerializeField] string newsUrl = "https://itch.io";
     [SerializeField] int memeCount = 3;
+    [SerializeField] bool keepProgressBetweenLaunches;
 
     Vector3 homeScale = Vector3.one;
     GameObject memePopup;
@@ -42,7 +44,8 @@ public class PetJourney : MonoBehaviour
     bool newsShown;
     long returnAtTicks;
     long moodReadyAtTicks;
-    Image moodFill;
+    float returnSecondsLeft = -1f;
+    bool returnCountdownArmed;
     Sprite[] memeSprites;
 
     void Awake()
@@ -52,21 +55,33 @@ public class PetJourney : MonoBehaviour
             pet = GetComponent<SpriteRenderer>();
         if (pet != null)
             homeScale = pet.transform.localScale;
+        if (homeScale.sqrMagnitude < 0.0001f)
+            homeScale = Vector3.one;
 
-        tripCount = PlayerPrefs.GetInt(TripCountKey, 0);
-        returnAtTicks = ReadTicks(ReturnAtKey);
-        moodReadyAtTicks = ReadTicks(MoodReadyKey);
-        newsShown = PlayerPrefs.GetInt(NewsSeenKey, 0) != 0;
+        tripCount = LoadInt(TripCountKey);
+        returnAtTicks = LoadTicks(ReturnAtKey);
+        moodReadyAtTicks = LoadTicks(MoodReadyKey);
+        newsShown = LoadInt(NewsSeenKey) != 0;
         BindJourneyButton();
-        CreateMoodBar();
+        BindMoodBar();
         CreateMemePopup();
 
         if (returnAtTicks > 0)
         {
-            SetJourneyButtonVisible(false);
-            if (pet != null)
-                pet.enabled = false;
-            away = true;
+            double remaining = (returnAtTicks - DateTime.UtcNow.Ticks) / (double)TimeSpan.TicksPerSecond;
+            if (remaining > 1d)
+            {
+                ArmReturnCountdown((float)remaining);
+                SetJourneyButtonVisible(false);
+                if (pet != null)
+                    pet.enabled = false;
+                away = true;
+            }
+            else
+            {
+                returnAtTicks = 0;
+                ClearReturnAt();
+            }
         }
     }
 
@@ -81,12 +96,20 @@ public class PetJourney : MonoBehaviour
         RefreshMoodBar();
         TryShowNews();
 
-        if (away && !returning && DateTime.UtcNow.Ticks >= returnAtTicks)
+        if (away && !returning)
         {
-            away = false;
-            returning = true;
-            ClearReturnAt();
-            StartCoroutine(ReturnHome());
+            if (returnCountdownArmed)
+                returnSecondsLeft -= Time.unscaledDeltaTime;
+
+            if (!departing && ReturnIsDue())
+            {
+                away = false;
+                returning = true;
+                returnCountdownArmed = false;
+                returnAtTicks = 0;
+                ClearReturnAt();
+                StartCoroutine(ReturnHome());
+            }
         }
 
         if (!waitingForDialogue)
@@ -111,8 +134,7 @@ public class PetJourney : MonoBehaviour
             return;
 
         newsShown = true;
-        PlayerPrefs.SetInt(NewsSeenKey, 1);
-        PlayerPrefs.Save();
+        SaveInt(NewsSeenKey, 1);
         PetDialogue.SayLink(newsLine + "\n" + newsUrl, newsUrl);
     }
 
@@ -123,7 +145,7 @@ public class PetJourney : MonoBehaviour
 
     void BeginJourney()
     {
-        if (away || returning || departing)
+        if (away || returning || departing || !PetDialogue.HasPlayerName)
             return;
 
         if (CurrentMood() < 0.999f)
@@ -133,22 +155,46 @@ public class PetJourney : MonoBehaviour
             return;
         }
 
+        float duration = Mathf.Max(1f, firstTripSeconds + tripCount * extraSecondsPerTrip);
+        tripCount++;
+        SaveInt(TripCountKey, tripCount);
+        returnAtTicks = DateTime.UtcNow.AddSeconds(duration).Ticks;
+        SaveString(ReturnAtKey, returnAtTicks.ToString());
+        ArmReturnCountdown(duration);
+        away = true;
+        departing = true;
+        returning = false;
+        SetJourneyButtonVisible(false);
         StartCoroutine(Depart());
+    }
+
+    void ArmReturnCountdown(float seconds)
+    {
+        returnSecondsLeft = Mathf.Max(0f, seconds);
+        returnCountdownArmed = true;
+    }
+
+    bool ReturnIsDue()
+    {
+        if (returnCountdownArmed && returnSecondsLeft <= 0f)
+            return true;
+        return returnAtTicks > 0 && DateTime.UtcNow.Ticks >= returnAtTicks;
     }
 
     IEnumerator Depart()
     {
-        departing = true;
-        SetJourneyButtonVisible(false);
         if (PetDialogue.Instance != null)
             PetDialogue.Instance.Hide();
 
         Vector3 start = pet != null ? pet.transform.localScale : homeScale;
+        if (start.sqrMagnitude < 0.0001f)
+            start = homeScale;
+        float shrink = Mathf.Max(0.05f, shrinkSeconds);
         float elapsed = 0f;
-        while (elapsed < shrinkSeconds)
+        while (elapsed < shrink)
         {
-            elapsed += Time.deltaTime;
-            float t = Mathf.Clamp01(elapsed / shrinkSeconds);
+            elapsed += Time.unscaledDeltaTime;
+            float t = Mathf.Clamp01(elapsed / shrink);
             if (pet != null)
                 pet.transform.localScale = Vector3.Lerp(start, Vector3.zero, t);
             yield return null;
@@ -160,15 +206,7 @@ public class PetJourney : MonoBehaviour
             pet.transform.localScale = homeScale;
         }
 
-        float duration = firstTripSeconds + tripCount * extraSecondsPerTrip;
-        tripCount++;
-        PlayerPrefs.SetInt(TripCountKey, tripCount);
-        returnAtTicks = DateTime.UtcNow.AddSeconds(duration).Ticks;
-        PlayerPrefs.SetString(ReturnAtKey, returnAtTicks.ToString());
-        PlayerPrefs.Save();
         departing = false;
-        away = true;
-        returning = false;
     }
 
     IEnumerator ReturnHome()
@@ -179,15 +217,17 @@ public class PetJourney : MonoBehaviour
         {
             pet.enabled = true;
             pet.transform.localScale = Vector3.zero;
+            float shrink = Mathf.Max(0.05f, shrinkSeconds);
             float elapsed = 0f;
-            while (elapsed < shrinkSeconds)
+            while (elapsed < shrink)
             {
-                elapsed += Time.deltaTime;
-                float t = Mathf.Clamp01(elapsed / shrinkSeconds);
+                elapsed += Time.unscaledDeltaTime;
+                float t = Mathf.Clamp01(elapsed / shrink);
                 pet.transform.localScale = Vector3.Lerp(Vector3.zero, homeScale, t);
                 yield return null;
             }
 
+            pet.enabled = true;
             pet.transform.localScale = homeScale;
         }
 
@@ -242,8 +282,7 @@ public class PetJourney : MonoBehaviour
     void BeginRest()
     {
         moodReadyAtTicks = DateTime.UtcNow.AddSeconds(moodRecoverSeconds).Ticks;
-        PlayerPrefs.SetString(MoodReadyKey, moodReadyAtTicks.ToString());
-        PlayerPrefs.Save();
+        SaveString(MoodReadyKey, moodReadyAtTicks.ToString());
         RefreshMoodBar();
     }
 
@@ -253,104 +292,23 @@ public class PetJourney : MonoBehaviour
             moodFill.fillAmount = CurrentMood();
     }
 
-    void CreateMoodBar()
+    void BindMoodBar()
     {
-        Transform parent = journeyButton != null ? journeyButton.transform.parent : null;
-        if (parent == null)
+        if (moodFill == null)
         {
-            var quitObject = GameObject.Find("Quit");
-            if (quitObject != null)
-                parent = quitObject.transform.parent;
+            var fillObject = GameObject.Find("MoodFill");
+            if (fillObject != null)
+                moodFill = fillObject.GetComponent<Image>();
         }
 
-        if (parent == null)
+        if (moodFill == null)
             return;
 
-        var root = new GameObject("Mood", typeof(RectTransform));
-        root.transform.SetParent(parent, false);
-        var rootRect = root.GetComponent<RectTransform>();
-        rootRect.anchorMin = Vector2.zero;
-        rootRect.anchorMax = Vector2.zero;
-        rootRect.pivot = Vector2.zero;
-        rootRect.anchoredPosition = new Vector2(12f, 12f);
-        rootRect.sizeDelta = new Vector2(116f, 24f);
-
-        var heartObject = new GameObject("Heart", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
-        heartObject.transform.SetParent(root.transform, false);
-        var heartRect = heartObject.GetComponent<RectTransform>();
-        heartRect.anchorMin = new Vector2(0f, 0.5f);
-        heartRect.anchorMax = new Vector2(0f, 0.5f);
-        heartRect.pivot = new Vector2(0f, 0.5f);
-        heartRect.anchoredPosition = Vector2.zero;
-        heartRect.sizeDelta = new Vector2(22f, 22f);
-        var heart = heartObject.GetComponent<Image>();
-        heart.sprite = CreateHeartSprite();
-        heart.preserveAspect = true;
-        heart.raycastTarget = false;
-
-        var trackObject = new GameObject("Track", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
-        trackObject.transform.SetParent(root.transform, false);
-        var trackRect = trackObject.GetComponent<RectTransform>();
-        trackRect.anchorMin = new Vector2(0f, 0.5f);
-        trackRect.anchorMax = new Vector2(0f, 0.5f);
-        trackRect.pivot = new Vector2(0f, 0.5f);
-        trackRect.anchoredPosition = new Vector2(28f, 0f);
-        trackRect.sizeDelta = new Vector2(88f, 10f);
-        var track = trackObject.GetComponent<Image>();
-        track.sprite = WhiteSprite();
-        track.color = new Color(0.42f, 0.28f, 0.3f, 1f);
-        track.raycastTarget = false;
-
-        var fillObject = new GameObject("Fill", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
-        fillObject.transform.SetParent(trackObject.transform, false);
-        var fillRect = fillObject.GetComponent<RectTransform>();
-        fillRect.anchorMin = Vector2.zero;
-        fillRect.anchorMax = Vector2.one;
-        fillRect.offsetMin = new Vector2(1f, 1f);
-        fillRect.offsetMax = new Vector2(-1f, -1f);
-        moodFill = fillObject.GetComponent<Image>();
-        moodFill.sprite = WhiteSprite();
         moodFill.type = Image.Type.Filled;
         moodFill.fillMethod = Image.FillMethod.Horizontal;
         moodFill.fillOrigin = (int)Image.OriginHorizontal.Left;
-        moodFill.color = new Color(0.93f, 0.32f, 0.42f, 1f);
         moodFill.raycastTarget = false;
         RefreshMoodBar();
-    }
-
-    static Sprite CreateHeartSprite()
-    {
-        const int size = 64;
-        var texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
-        texture.filterMode = FilterMode.Bilinear;
-        var pixels = new Color[size * size];
-        var fill = new Color(0.93f, 0.28f, 0.4f, 1f);
-        float center = (size - 1) * 0.5f;
-        float radius = size * 0.34f;
-
-        for (int y = 0; y < size; y++)
-        {
-            for (int x = 0; x < size; x++)
-            {
-                float nx = (x - center) / radius;
-                float ny = (y - center) / radius + 0.15f;
-                float a = nx * nx + ny * ny - 1f;
-                bool inside = a * a * a - nx * nx * ny * ny * ny <= 0f;
-                pixels[y * size + x] = inside ? fill : new Color(0f, 0f, 0f, 0f);
-            }
-        }
-
-        texture.SetPixels(pixels);
-        texture.Apply();
-        return Sprite.Create(texture, new Rect(0f, 0f, size, size), new Vector2(0.5f, 0.5f), 100f);
-    }
-
-    static Sprite WhiteSprite()
-    {
-        var texture = new Texture2D(1, 1, TextureFormat.RGBA32, false);
-        texture.SetPixel(0, 0, Color.white);
-        texture.Apply();
-        return Sprite.Create(texture, new Rect(0f, 0f, 1f, 1f), new Vector2(0.5f, 0.5f), 100f);
     }
 
     void BindJourneyButton()
@@ -492,14 +450,41 @@ public class PetJourney : MonoBehaviour
             journeyButton.gameObject.SetActive(visible);
     }
 
-    static long ReadTicks(string key)
+    int LoadInt(string key, int fallback = 0)
     {
+        if (!keepProgressBetweenLaunches)
+            return fallback;
+        return PlayerPrefs.GetInt(key, fallback);
+    }
+
+    long LoadTicks(string key)
+    {
+        if (!keepProgressBetweenLaunches)
+            return 0L;
         string stored = PlayerPrefs.GetString(key, "0");
         return long.TryParse(stored, out long ticks) ? ticks : 0L;
     }
 
-    static void ClearReturnAt()
+    void SaveInt(string key, int value)
     {
+        if (!keepProgressBetweenLaunches)
+            return;
+        PlayerPrefs.SetInt(key, value);
+        PlayerPrefs.Save();
+    }
+
+    void SaveString(string key, string value)
+    {
+        if (!keepProgressBetweenLaunches)
+            return;
+        PlayerPrefs.SetString(key, value);
+        PlayerPrefs.Save();
+    }
+
+    void ClearReturnAt()
+    {
+        if (!keepProgressBetweenLaunches)
+            return;
         PlayerPrefs.DeleteKey(ReturnAtKey);
         PlayerPrefs.Save();
     }

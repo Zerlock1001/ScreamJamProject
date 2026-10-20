@@ -52,7 +52,7 @@ public class CapsuleMenu : MonoBehaviour
     {
         if (cam == null)
             cam = Camera.main;
-        if (capsule == null || cam == null)
+        if (capsule == null || cam == null || !PetDialogue.HasPlayerName)
             return;
 
         if (menuVisible)

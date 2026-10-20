@@ -20,8 +20,9 @@ public class QuitRefusal : MonoBehaviour
 
     static QuitRefusal instance;
 
+    GameObject noteRoot;
+    Image noteBackground;
     Text awayNote;
-    Outline awayOutline;
     float noteTime;
 
     void Awake()
@@ -41,14 +42,14 @@ public class QuitRefusal : MonoBehaviour
 
     void Update()
     {
-        if (awayNote == null || noteTime <= 0f)
+        if (noteRoot == null || noteTime <= 0f)
             return;
 
         noteTime -= Time.deltaTime;
         float alpha = noteTime <= NoteFadeSeconds ? Mathf.Clamp01(noteTime / NoteFadeSeconds) : 1f;
         ApplyNoteAlpha(alpha);
         if (noteTime <= 0f)
-            awayNote.gameObject.SetActive(false);
+            noteRoot.SetActive(false);
     }
 
     public static void Play()
@@ -65,10 +66,11 @@ public class QuitRefusal : MonoBehaviour
 
     void ShowAwayNote()
     {
-        if (awayNote == null)
+        if (noteRoot == null || awayNote == null)
             return;
 
-        awayNote.gameObject.SetActive(true);
+        noteRoot.SetActive(true);
+        noteRoot.transform.SetAsLastSibling();
         awayNote.text = AwayLine;
         noteTime = NoteHoldSeconds + NoteFadeSeconds;
         ApplyNoteAlpha(1f);
@@ -76,41 +78,53 @@ public class QuitRefusal : MonoBehaviour
 
     void ApplyNoteAlpha(float alpha)
     {
+        if (noteBackground != null)
+        {
+            Color background = noteBackground.color;
+            background.a = alpha;
+            noteBackground.color = background;
+        }
+
         Color color = awayNote.color;
         color.a = alpha;
         awayNote.color = color;
-        if (awayOutline != null)
-        {
-            Color outline = awayOutline.effectColor;
-            outline.a = alpha;
-            awayOutline.effectColor = outline;
-        }
     }
 
     void CreateAwayNote()
     {
-        var textObject = new GameObject("AwayNote", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text), typeof(Outline));
-        textObject.transform.SetParent(transform, false);
-        var rect = textObject.GetComponent<RectTransform>();
-        rect.anchorMin = new Vector2(0.5f, 1f);
-        rect.anchorMax = new Vector2(0.5f, 1f);
-        rect.pivot = new Vector2(0.5f, 0f);
-        rect.anchoredPosition = new Vector2(0f, 8f);
-        rect.sizeDelta = new Vector2(240f, 48f);
+        var quitRect = (RectTransform)transform;
+        Transform parent = transform.parent != null ? transform.parent : transform;
+
+        noteRoot = new GameObject("AwayNote", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        noteRoot.transform.SetParent(parent, false);
+        var rootRect = noteRoot.GetComponent<RectTransform>();
+        rootRect.anchorMin = quitRect.anchorMin;
+        rootRect.anchorMax = quitRect.anchorMax;
+        rootRect.pivot = new Vector2(0.5f, 0f);
+        rootRect.sizeDelta = new Vector2(328f, 96f);
+        rootRect.anchoredPosition = new Vector2(0f, quitRect.anchoredPosition.y + quitRect.sizeDelta.y * 0.5f + 8f);
+
+        noteBackground = noteRoot.GetComponent<Image>();
+        noteBackground.color = new Color(0.99f, 0.96f, 0.9f, 0f);
+        noteBackground.raycastTarget = false;
+
+        var textObject = new GameObject("Text", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text));
+        textObject.transform.SetParent(noteRoot.transform, false);
+        var textRect = textObject.GetComponent<RectTransform>();
+        textRect.anchorMin = Vector2.zero;
+        textRect.anchorMax = Vector2.one;
+        textRect.offsetMin = new Vector2(16f, 12f);
+        textRect.offsetMax = new Vector2(-16f, -12f);
 
         awayNote = textObject.GetComponent<Text>();
         awayNote.font = BuiltinFont();
-        awayNote.fontSize = 14;
-        awayNote.alignment = TextAnchor.LowerCenter;
+        awayNote.fontSize = 16;
+        awayNote.alignment = TextAnchor.MiddleCenter;
         awayNote.horizontalOverflow = HorizontalWrapMode.Wrap;
         awayNote.verticalOverflow = VerticalWrapMode.Overflow;
-        awayNote.color = new Color(0.98f, 0.96f, 0.92f, 0f);
+        awayNote.color = new Color(0.24f, 0.16f, 0.12f, 0f);
         awayNote.raycastTarget = false;
-
-        awayOutline = textObject.GetComponent<Outline>();
-        awayOutline.effectColor = new Color(0.28f, 0.16f, 0.12f, 0f);
-        awayOutline.effectDistance = new Vector2(1f, -1f);
-        textObject.SetActive(false);
+        noteRoot.SetActive(false);
     }
 
     static Font BuiltinFont()

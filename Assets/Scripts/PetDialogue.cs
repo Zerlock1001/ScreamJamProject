@@ -3,6 +3,8 @@ using System.Collections;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using UnityEngine;
+using UnityEngine.EventSystems;
+using UnityEngine.UI;
 
 /// <summary>
 /// 桌面上的一句对话：弹出气泡，显示文字，点击气泡后关闭。
@@ -13,7 +15,7 @@ public class PetDialogue : MonoBehaviour
 
     [SerializeField] SpriteRenderer speaker;
     [SerializeField] bool playIntroOnStart = true;
-    [SerializeField] string[] introLines = { "Intro text 1", "Intro text 2" };
+    [SerializeField] string[] introLines = { "Hi, XX! I'm Blinky, your companion pets.", "Intro text 2" };
     [SerializeField] float clickSlopPixels = 18f;
     [SerializeField] int charactersPerLine = 10;
     [SerializeField] Vector2 bubbleSize = new Vector2(5.4f, 2.15f);
@@ -43,7 +45,11 @@ public class PetDialogue : MonoBehaviour
     int sequenceIndex;
     string clickUrl;
     Vector2 pressScreen;
+    GameObject namePrompt;
+    InputField nameInput;
 
+    public static string PlayerName { get; private set; }
+    public static bool HasPlayerName => !string.IsNullOrEmpty(PlayerName);
     public bool IsOpen => visible;
 
     public static void Say(string text)
@@ -97,6 +103,9 @@ public class PetDialogue : MonoBehaviour
         if (speaker == null)
             speaker = GetComponent<SpriteRenderer>();
         cam = Camera.main;
+        if (speaker != null)
+            speaker.enabled = false;
+        HoldIdle();
         CreateBubble();
         Hide();
     }
@@ -109,8 +118,10 @@ public class PetDialogue : MonoBehaviour
 
     void Start()
     {
-        if (playIntroOnStart)
-            BeginIntro();
+        if (speaker != null)
+            speaker.enabled = false;
+        HoldIdle();
+        ShowNamePrompt();
     }
 
     void Update()
@@ -148,7 +159,7 @@ public class PetDialogue : MonoBehaviour
         playingIntro = true;
         introIndex = 0;
         clickUrl = null;
-        Show(introLines[0]);
+        Show(IntroText(0));
     }
 
     void ShowNext(string[] lines)
@@ -189,7 +200,7 @@ public class PetDialogue : MonoBehaviour
         if (playingIntro && introLines != null && introIndex + 1 < introLines.Length)
         {
             introIndex++;
-            Show(introLines[introIndex]);
+            Show(IntroText(introIndex));
             return;
         }
 
@@ -197,6 +208,235 @@ public class PetDialogue : MonoBehaviour
             playingIntro = false;
 
         Hide();
+    }
+
+    string IntroText(int index)
+    {
+        if (introLines == null || index < 0 || index >= introLines.Length)
+            return string.Empty;
+
+        string line = introLines[index];
+        if (index != 0)
+            return line;
+
+        string name = PlayerName;
+        if (string.IsNullOrWhiteSpace(name))
+            name = "there";
+        if (!string.IsNullOrEmpty(line) && line.Contains("XX"))
+            return line.Replace("XX", name);
+        return "Hi, " + name + "! I'm Blinky, your companion pets.";
+    }
+
+    void ShowNamePrompt()
+    {
+        var canvas = FindObjectOfType<Canvas>();
+        if (canvas == null)
+        {
+            FinishNamePrompt("there");
+            return;
+        }
+
+        namePrompt = new GameObject("NamePrompt", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        namePrompt.transform.SetParent(canvas.transform, false);
+        var panelRect = namePrompt.GetComponent<RectTransform>();
+        panelRect.anchorMin = new Vector2(0.5f, 0.5f);
+        panelRect.anchorMax = new Vector2(0.5f, 0.5f);
+        panelRect.pivot = new Vector2(0.5f, 0.5f);
+        panelRect.sizeDelta = new Vector2(260f, 148f);
+        var panelImage = namePrompt.GetComponent<Image>();
+        panelImage.color = new Color(0.99f, 0.96f, 0.9f, 1f);
+        panelImage.raycastTarget = true;
+
+        Font font = BuiltinFont();
+        CreatePromptLabel(namePrompt.transform, font);
+        nameInput = CreatePromptInput(namePrompt.transform, font);
+        CreatePromptButton(namePrompt.transform, font);
+        StartCoroutine(FocusNameInput());
+    }
+
+    void CreatePromptLabel(Transform parent, Font font)
+    {
+        var labelObject = new GameObject("Label", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text));
+        labelObject.transform.SetParent(parent, false);
+        var rect = labelObject.GetComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0f, 1f);
+        rect.anchorMax = new Vector2(1f, 1f);
+        rect.pivot = new Vector2(0.5f, 1f);
+        rect.anchoredPosition = new Vector2(0f, -12f);
+        rect.sizeDelta = new Vector2(-24f, 36f);
+        var label = labelObject.GetComponent<Text>();
+        label.font = font;
+        label.fontSize = 15;
+        label.alignment = TextAnchor.MiddleCenter;
+        label.color = new Color(0.24f, 0.16f, 0.12f, 1f);
+        label.text = "Please enter your username";
+        label.raycastTarget = false;
+    }
+
+    InputField CreatePromptInput(Transform parent, Font font)
+    {
+        var inputObject = new GameObject("Input", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(InputField));
+        inputObject.transform.SetParent(parent, false);
+        var rect = inputObject.GetComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0.5f, 0.5f);
+        rect.anchorMax = new Vector2(0.5f, 0.5f);
+        rect.pivot = new Vector2(0.5f, 0.5f);
+        rect.anchoredPosition = new Vector2(0f, 4f);
+        rect.sizeDelta = new Vector2(220f, 32f);
+        var image = inputObject.GetComponent<Image>();
+        image.color = new Color(1f, 1f, 1f, 1f);
+
+        var text = CreateInputText(inputObject.transform, font, "Text", new Color(0.2f, 0.14f, 0.1f, 1f), FontStyle.Normal);
+        text.text = string.Empty;
+        var placeholder = CreateInputText(inputObject.transform, font, "Placeholder", new Color(0.55f, 0.48f, 0.42f, 1f), FontStyle.Italic);
+        placeholder.text = "Username";
+
+        var input = inputObject.GetComponent<InputField>();
+        input.textComponent = text;
+        input.placeholder = placeholder;
+        input.lineType = InputField.LineType.SingleLine;
+        input.characterLimit = 24;
+        input.onSubmit.AddListener(FinishNamePrompt);
+        return input;
+    }
+
+    static Text CreateInputText(Transform parent, Font font, string name, Color color, FontStyle style)
+    {
+        var textObject = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Text));
+        textObject.transform.SetParent(parent, false);
+        var rect = textObject.GetComponent<RectTransform>();
+        rect.anchorMin = Vector2.zero;
+        rect.anchorMax = Vector2.one;
+        rect.offsetMin = new Vector2(8f, 4f);
+        rect.offsetMax = new Vector2(-8f, -4f);
+        var text = textObject.GetComponent<Text>();
+        text.font = font;
+        text.fontSize = 15;
+        text.fontStyle = style;
+        text.alignment = TextAnchor.MiddleLeft;
+        text.color = color;
+        text.supportRichText = false;
+        text.raycastTarget = false;
+        return text;
+    }
+
+    void CreatePromptButton(Transform parent, Font font)
+    {
+        var buttonObject = new GameObject("OK", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
+        buttonObject.transform.SetParent(parent, false);
+        var rect = buttonObject.GetComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0.5f, 0f);
+        rect.anchorMax = new Vector2(0.5f, 0f);
+        rect.pivot = new Vector2(0.5f, 0f);
+        rect.anchoredPosition = new Vector2(0f, 14f);
+        rect.sizeDelta = new Vector2(88f, 28f);
+        var image = buttonObject.GetComponent<Image>();
+        image.color = new Color(0.93f, 0.55f, 0.42f, 1f);
+        var button = buttonObject.GetComponent<Button>();
+        button.targetGraphic = image;
+        button.onClick.AddListener(() => FinishNamePrompt(nameInput != null ? nameInput.text : string.Empty));
+
+        var labelObject = new GameObject("Label", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text));
+        labelObject.transform.SetParent(buttonObject.transform, false);
+        var labelRect = labelObject.GetComponent<RectTransform>();
+        labelRect.anchorMin = Vector2.zero;
+        labelRect.anchorMax = Vector2.one;
+        labelRect.offsetMin = Vector2.zero;
+        labelRect.offsetMax = Vector2.zero;
+        var label = labelObject.GetComponent<Text>();
+        label.font = font;
+        label.fontSize = 14;
+        label.alignment = TextAnchor.MiddleCenter;
+        label.color = new Color(0.24f, 0.14f, 0.1f, 1f);
+        label.text = "OK";
+        label.raycastTarget = false;
+    }
+
+    IEnumerator FocusNameInput()
+    {
+        yield return null;
+        if (nameInput == null)
+            yield break;
+        if (EventSystem.current != null)
+            EventSystem.current.SetSelectedGameObject(nameInput.gameObject);
+        nameInput.ActivateInputField();
+    }
+
+    void FinishNamePrompt(string raw)
+    {
+        if (HasPlayerName)
+            return;
+
+        string name = string.IsNullOrWhiteSpace(raw) ? string.Empty : raw.Trim();
+        if (string.IsNullOrEmpty(name))
+            return;
+
+        PlayerName = name;
+        if (namePrompt != null)
+            Destroy(namePrompt);
+        namePrompt = null;
+        nameInput = null;
+
+        if (speaker != null && !PetJourney.PetIsAway)
+        {
+            speaker.enabled = true;
+            PlayEnter();
+        }
+        if (playIntroOnStart)
+            StartCoroutine(BeginIntroAfterEnter());
+    }
+
+    IEnumerator BeginIntroAfterEnter()
+    {
+        float enterLength = EnterClipLength();
+        if (enterLength > 0f)
+            yield return new WaitForSecondsRealtime(enterLength);
+
+        yield return new WaitForSecondsRealtime(1f);
+        BeginIntro();
+    }
+
+    float EnterClipLength()
+    {
+        var animator = GetComponent<Animator>();
+        if (animator == null || animator.runtimeAnimatorController == null)
+            return 0f;
+
+        AnimationClip[] clips = animator.runtimeAnimatorController.animationClips;
+        for (int i = 0; i < clips.Length; i++)
+        {
+            if (clips[i] != null && clips[i].name == "Enter")
+                return clips[i].length;
+        }
+
+        return 0f;
+    }
+
+    void HoldIdle()
+    {
+        var animator = GetComponent<Animator>();
+        if (animator == null || animator.runtimeAnimatorController == null)
+            return;
+
+        animator.Play("Idle", 0, 0f);
+        animator.Update(0f);
+    }
+
+    void PlayEnter()
+    {
+        var animator = GetComponent<Animator>();
+        if (animator == null || animator.runtimeAnimatorController == null)
+            return;
+
+        animator.Play("Enter", 0, 0f);
+    }
+
+    static Font BuiltinFont()
+    {
+        Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        if (font == null)
+            font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+        return font;
     }
 
     public void Show(string text)

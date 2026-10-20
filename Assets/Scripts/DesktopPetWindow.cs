@@ -97,6 +97,7 @@ public class DesktopPetWindow : MonoBehaviour
     readonly List<SpriteSample> samples = new List<SpriteSample>();
     readonly Dictionary<int, Color32[]> pixelCache = new Dictionary<int, Color32[]>();
     readonly List<RaycastResult> uiHits = new List<RaycastResult>();
+    readonly Vector3[] uiCorners = new Vector3[4];
 #endif
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
@@ -140,6 +141,11 @@ public class DesktopPetWindow : MonoBehaviour
             return;
         }
 
+        if (Screen.fullScreenMode != FullScreenMode.Windowed)
+            Screen.fullScreenMode = FullScreenMode.Windowed;
+
+        TrackCurrentWindow();
+        EnsureNotCoveringMonitor();
         ConfigureCamera();
         CacheHitData();
         EnsureHook();
@@ -267,19 +273,28 @@ public class DesktopPetWindow : MonoBehaviour
         EnsureHook();
         ready = true;
 
-        for (int i = 0; i < 5; i++)
+        for (int i = 0; i < 30; i++)
         {
             yield return null;
-            IntPtr current = ResolveWindow();
-            if (current != IntPtr.Zero && current != hwnd)
-            {
-                RestoreHook();
-                hwnd = current;
-            }
-
-            ApplyBorderless(placeOnScreen: false);
-            EnsureHook();
+            TrackCurrentWindow();
         }
+    }
+
+    void TrackCurrentWindow()
+    {
+        IntPtr current = ResolveWindow();
+        if (current == IntPtr.Zero)
+            return;
+        if (current == hwnd)
+        {
+            EnsureHook();
+            return;
+        }
+
+        RestoreHook();
+        hwnd = current;
+        ApplyBorderless(placeOnScreen: false);
+        EnsureHook();
     }
 
     void ApplyBorderless(bool placeOnScreen)
@@ -320,17 +335,55 @@ public class DesktopPetWindow : MonoBehaviour
             return;
         }
 
+        int width = Mathf.Max(1, windowWidth);
+        int height = Mathf.Max(1, windowHeight);
         int x = screenMargin;
         int y = screenMargin;
         var monitor = MonitorFromWindow(hwnd, MonitorDefaultToNearest);
         var info = new MonitorInfo { cbSize = Marshal.SizeOf(typeof(MonitorInfo)) };
         if (monitor != IntPtr.Zero && GetMonitorInfo(monitor, ref info))
         {
-            x = info.rcWork.right - windowWidth - screenMargin;
-            y = info.rcWork.bottom - windowHeight - screenMargin;
+            int workWidth = Mathf.Max(1, info.rcWork.right - info.rcWork.left);
+            int workHeight = Mathf.Max(1, info.rcWork.bottom - info.rcWork.top);
+            // A window that exactly covers the monitor is treated as fullscreen and stops letting clicks through.
+            if (width >= workWidth)
+                width = workWidth - 1;
+            if (height >= workHeight)
+                height = workHeight - 1;
+            x = info.rcWork.right - width - screenMargin;
+            y = info.rcWork.bottom - height - screenMargin;
+            x = Mathf.Clamp(x, info.rcWork.left, info.rcWork.right - width);
+            y = Mathf.Clamp(y, info.rcWork.top, info.rcWork.bottom - height);
         }
 
-        SetWindowPos(hwnd, zOrder, x, y, windowWidth, windowHeight, SwpFrameChanged | SwpShowWindow);
+        SetWindowPos(hwnd, zOrder, x, y, width, height, SwpFrameChanged | SwpShowWindow);
+    }
+
+    void EnsureNotCoveringMonitor()
+    {
+        if (hwnd == IntPtr.Zero || !GetWindowRect(hwnd, out NativeRect window))
+            return;
+
+        var monitor = MonitorFromWindow(hwnd, MonitorDefaultToNearest);
+        var info = new MonitorInfo { cbSize = Marshal.SizeOf(typeof(MonitorInfo)) };
+        if (monitor == IntPtr.Zero || !GetMonitorInfo(monitor, ref info))
+            return;
+
+        int workWidth = info.rcWork.right - info.rcWork.left;
+        int workHeight = info.rcWork.bottom - info.rcWork.top;
+        int width = window.right - window.left;
+        int height = window.bottom - window.top;
+        if (workWidth <= 1 || workHeight <= 1 || (width < workWidth && height < workHeight))
+            return;
+
+        if (width >= workWidth)
+            width = workWidth - 1;
+        if (height >= workHeight)
+            height = workHeight - 1;
+        int x = Mathf.Clamp(window.left, info.rcWork.left, info.rcWork.right - width);
+        int y = Mathf.Clamp(window.top, info.rcWork.top, info.rcWork.bottom - height);
+        IntPtr zOrder = alwaysOnTop ? HwndTopMost : HwndNoTopMost;
+        SetWindowPos(hwnd, zOrder, x, y, width, height, SwpFrameChanged | SwpShowWindow);
     }
 
     void CacheHitData()
@@ -435,7 +488,27 @@ public class DesktopPetWindow : MonoBehaviour
         };
         uiHits.Clear();
         EventSystem.current.RaycastAll(pointer, uiHits);
-        return uiHits.Count > 0;
+        for (int i = 0; i < uiHits.Count; i++)
+        {
+            var graphic = uiHits[i].gameObject.GetComponent<UnityEngine.UI.Graphic>();
+            if (graphic == null || !graphic.raycastTarget || !graphic.enabled)
+                continue;
+            if (graphic.color.a <= clickAlphaThreshold)
+                continue;
+            if (CoversWindow(graphic) && graphic.color.a < 0.95f)
+                continue;
+            return true;
+        }
+
+        return false;
+    }
+
+    bool CoversWindow(UnityEngine.UI.Graphic graphic)
+    {
+        graphic.rectTransform.GetWorldCorners(uiCorners);
+        float width = uiCorners[2].x - uiCorners[0].x;
+        float height = uiCorners[2].y - uiCorners[0].y;
+        return width >= bufferWidth * 0.92f && height >= bufferHeight * 0.92f;
     }
 
     Vector3 ScreenPointToWorld(float screenX, float screenY)
@@ -631,6 +704,9 @@ public class DesktopPetWindow : MonoBehaviour
 
     [DllImport("user32.dll")]
     static extern bool GetClientRect(IntPtr hWnd, out NativeRect lpRect);
+
+    [DllImport("user32.dll")]
+    static extern bool GetWindowRect(IntPtr hWnd, out NativeRect lpRect);
 
     [DllImport("user32.dll")]
     static extern bool ReleaseCapture();
