@@ -62,7 +62,7 @@ public class CapsuleDesktopShortcut : MonoBehaviour
     void CreateDesktopShortcut()
     {
 #if UNITY_EDITOR
-        ShowStatus("请打包后运行再点击");
+        ShowStatus("Build and run, then click again.");
         UnityEngine.Debug.LogWarning("桌面快捷方式只在打包后的游戏里创建，编辑器播放不会指向 Unity。");
 #else
         try
@@ -70,14 +70,14 @@ public class CapsuleDesktopShortcut : MonoBehaviour
             string exePath = ResolveExecutablePath();
             if (string.IsNullOrEmpty(exePath) || !File.Exists(exePath))
             {
-                ShowStatus("没找到游戏本体");
+                ShowStatus("Couldn't find the game.");
                 return;
             }
 
             string desktop = GetDesktopFolder();
             if (string.IsNullOrEmpty(desktop) || !Directory.Exists(desktop))
             {
-                ShowStatus("没找到桌面");
+                ShowStatus("Couldn't find the desktop.");
                 return;
             }
 
@@ -91,17 +91,17 @@ public class CapsuleDesktopShortcut : MonoBehaviour
             WriteShortcutWithScript(lnkPath, exePath);
             if (!File.Exists(lnkPath))
             {
-                ShowStatus("快捷方式没有写入");
+                ShowStatus("The shortcut was not saved.");
                 return;
             }
 
             NotifyShell(lnkPath);
-            ShowStatus("已创建桌面快捷方式");
+            ShowStatus("Desktop shortcut created.");
             UnityEngine.Debug.Log("已在桌面创建快捷方式：" + lnkPath);
         }
         catch (Exception exception)
         {
-            ShowStatus("创建失败");
+            ShowStatus("Couldn't create the shortcut.");
             UnityEngine.Debug.LogWarning("创建桌面快捷方式失败：" + exception.Message);
         }
 #endif

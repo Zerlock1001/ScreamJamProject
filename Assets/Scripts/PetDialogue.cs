@@ -13,7 +13,7 @@ public class PetDialogue : MonoBehaviour
 
     [SerializeField] SpriteRenderer speaker;
     [SerializeField] bool playIntroOnStart = true;
-    [SerializeField] string[] introLines = { "介绍文本1", "介绍文本2" };
+    [SerializeField] string[] introLines = { "Intro text 1", "Intro text 2" };
     [SerializeField] float clickSlopPixels = 18f;
     [SerializeField] int charactersPerLine = 10;
     [SerializeField] Vector2 bubbleSize = new Vector2(5.4f, 2.15f);
@@ -34,20 +34,56 @@ public class PetDialogue : MonoBehaviour
     SpriteRenderer bubbleRenderer;
     TextMesh bodyText;
     MeshRenderer bodyRenderer;
-    const string IntroSeenKey = "PetDialogue.IntroSeen";
 
     bool visible;
     bool pressedBubble;
     bool playingIntro;
     int introIndex;
+    string[] sequence;
+    int sequenceIndex;
+    string clickUrl;
     Vector2 pressScreen;
 
     public bool IsOpen => visible;
 
     public static void Say(string text)
     {
+        if (Instance == null)
+            return;
+
+        Instance.clickUrl = null;
+        Instance.Show(text);
+    }
+
+    public static void SayOnce(string text)
+    {
+        if (Instance == null)
+            return;
+
+        Instance.playingIntro = false;
+        Instance.sequence = null;
+        Instance.clickUrl = null;
+        Instance.Show(text);
+    }
+
+    public static void SayLink(string text, string url)
+    {
+        if (Instance == null)
+            return;
+
+        Instance.playingIntro = false;
+        Instance.sequence = null;
+        Instance.clickUrl = url;
+        Instance.Show(text);
+    }
+
+    public static bool HasPendingLink =>
+        Instance != null && Instance.visible && !string.IsNullOrEmpty(Instance.clickUrl);
+
+    public static void PlaySequence(string[] lines)
+    {
         if (Instance != null)
-            Instance.Show(text);
+            Instance.ShowNext(lines);
     }
 
     public static bool Blocks(Vector2 screenPoint)
@@ -73,7 +109,7 @@ public class PetDialogue : MonoBehaviour
 
     void Start()
     {
-        if (playIntroOnStart && PlayerPrefs.GetInt(IntroSeenKey, 0) == 0)
+        if (playIntroOnStart)
             BeginIntro();
     }
 
@@ -111,11 +147,45 @@ public class PetDialogue : MonoBehaviour
 
         playingIntro = true;
         introIndex = 0;
+        clickUrl = null;
         Show(introLines[0]);
+    }
+
+    void ShowNext(string[] lines)
+    {
+        if (lines == null || lines.Length == 0)
+            return;
+
+        if (sequence == lines)
+            sequenceIndex = (sequenceIndex + 1) % lines.Length;
+        else
+        {
+            sequence = lines;
+            sequenceIndex = 0;
+        }
+
+        playingIntro = false;
+        clickUrl = null;
+        Show(lines[sequenceIndex]);
     }
 
     void AdvanceIntroOrHide()
     {
+        if (!string.IsNullOrEmpty(clickUrl))
+        {
+            string url = clickUrl;
+            clickUrl = null;
+            Hide();
+            Application.OpenURL(url);
+            return;
+        }
+
+        if (sequence != null)
+        {
+            Hide();
+            return;
+        }
+
         if (playingIntro && introLines != null && introIndex + 1 < introLines.Length)
         {
             introIndex++;
@@ -124,11 +194,7 @@ public class PetDialogue : MonoBehaviour
         }
 
         if (playingIntro)
-        {
             playingIntro = false;
-            PlayerPrefs.SetInt(IntroSeenKey, 1);
-            PlayerPrefs.Save();
-        }
 
         Hide();
     }
@@ -152,6 +218,7 @@ public class PetDialogue : MonoBehaviour
     {
         visible = false;
         pressedBubble = false;
+        clickUrl = null;
         if (bubbleObject != null)
             bubbleObject.SetActive(false);
     }
@@ -257,32 +324,38 @@ public class PetDialogue : MonoBehaviour
 
     static string Wrap(string text, int perLine)
     {
-        if (string.IsNullOrEmpty(text) || text.Length <= perLine)
+        if (string.IsNullOrEmpty(text) || perLine < 1 || text.Length <= perLine)
             return text;
 
         var wrapped = new System.Text.StringBuilder(text.Length + 8);
-        int column = 0;
-        for (int i = 0; i < text.Length; i++)
+        int index = 0;
+        while (index < text.Length)
         {
-            char character = text[i];
-            if (character == '\n')
+            if (text[index] == '\n')
             {
                 wrapped.Append('\n');
-                column = 0;
+                index++;
                 continue;
             }
 
-            if (column >= perLine)
+            int remaining = text.Length - index;
+            if (remaining <= perLine)
             {
-                wrapped.Append('\n');
-                column = 0;
+                wrapped.Append(text, index, remaining);
+                break;
             }
 
-            wrapped.Append(character);
-            column++;
+            int end = index + perLine - 1;
+            int breakAt = text.LastIndexOf(' ', end, perLine);
+            if (breakAt <= index)
+                breakAt = index + perLine;
+
+            wrapped.Append(text, index, breakAt - index);
+            wrapped.Append('\n');
+            index = breakAt < text.Length && text[breakAt] == ' ' ? breakAt + 1 : breakAt;
         }
 
-        return wrapped.ToString();
+        return wrapped.ToString().TrimEnd('\n');
     }
 
     IEnumerator FitText()

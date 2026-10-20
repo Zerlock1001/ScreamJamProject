@@ -8,7 +8,7 @@ public class CapsuleLinkDialog : MonoBehaviour
 {
     [SerializeField] SpriteRenderer capsule;
     [SerializeField] string url = "https://itch.io";
-    [SerializeField] string message = "再点一次打开网页";
+    [SerializeField] string message = "Click again to open the page.";
     [SerializeField] float clickSlopPixels = 12f;
     [SerializeField] Vector2 panelSize = new Vector2(4.4f, 1.35f);
     [SerializeField] float gap = 0.28f;

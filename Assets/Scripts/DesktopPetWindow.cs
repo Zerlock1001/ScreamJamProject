@@ -96,6 +96,7 @@ public class DesktopPetWindow : MonoBehaviour
     int bufferHeight = 1;
     readonly List<SpriteSample> samples = new List<SpriteSample>();
     readonly Dictionary<int, Color32[]> pixelCache = new Dictionary<int, Color32[]>();
+    readonly List<RaycastResult> uiHits = new List<RaycastResult>();
 #endif
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
@@ -135,7 +136,7 @@ public class DesktopPetWindow : MonoBehaviour
 
         if (Input.GetKeyDown(KeyCode.Escape))
         {
-            Application.Quit();
+            QuitRefusal.Play();
             return;
         }
 
@@ -420,7 +421,21 @@ public class DesktopPetWindow : MonoBehaviour
 
         screenPx = (point.x + 0.5f) * bufferWidth / clientWidth;
         screenPy = (clientHeight - point.y - 0.5f) * bufferHeight / clientHeight;
-        return HitWorld(ScreenPointToWorld(screenPx, screenPy));
+        return HitsInterface(screenPx, screenPy) || HitWorld(ScreenPointToWorld(screenPx, screenPy));
+    }
+
+    bool HitsInterface(float screenX, float screenY)
+    {
+        if (EventSystem.current == null)
+            return false;
+
+        var pointer = new PointerEventData(EventSystem.current)
+        {
+            position = new Vector2(screenX, screenY)
+        };
+        uiHits.Clear();
+        EventSystem.current.RaycastAll(pointer, uiHits);
+        return uiHits.Count > 0;
     }
 
     Vector3 ScreenPointToWorld(float screenX, float screenY)

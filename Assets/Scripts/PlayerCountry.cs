@@ -41,7 +41,7 @@ public class PlayerCountry : MonoBehaviour
     IEnumerator Lookup()
     {
         if (showLabel)
-            SetLabel("正在查询国家");
+            SetLabel("Looking up country");
 
         string code = null;
         yield return RequestCountryCode("https://api.country.is/", true, value => code = value);
@@ -50,7 +50,7 @@ public class PlayerCountry : MonoBehaviour
 
         if (string.IsNullOrEmpty(code))
         {
-            SetLabel("国家查询失败");
+            SetLabel("Country lookup failed");
             Debug.LogWarning("没有查询到国家。请确认游戏可以访问网络。");
             yield break;
         }

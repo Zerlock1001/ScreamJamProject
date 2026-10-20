@@ -49,7 +49,7 @@ public class PetWebcam : MonoBehaviour
         WebCamDevice[] devices = WebCamTexture.devices;
         if (devices == null || devices.Length == 0)
         {
-            error = "没有找到摄像头。";
+            error = "No camera found.";
             Debug.LogWarning(error);
             return;
         }
@@ -118,7 +118,7 @@ public class PetWebcam : MonoBehaviour
 
         if (!feed.isPlaying || feed.width <= 16)
         {
-            error = "摄像头没有画面。请在 Windows 设置 → 隐私和安全性 → 相机 中允许桌面应用访问。";
+            error = "The camera has no picture. Allow desktop apps to use the camera in Windows privacy settings.";
             Debug.LogWarning(error);
             yield break;
         }
