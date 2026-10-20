@@ -40,14 +40,14 @@ public class CapsuleDesktopShortcut : MonoBehaviour
         if (Input.GetMouseButtonDown(0))
         {
             pressScreen = PointerScreen();
-            pressedCapsule = HitsCapsule(pressScreen);
+            pressedCapsule = HitsCapsule(pressScreen) && !PetDialogue.Blocks(pressScreen);
         }
 
         if (!Input.GetMouseButtonUp(0))
             return;
 
         Vector2 releaseScreen = PointerScreen();
-        bool wasCapsule = pressedCapsule || HitsCapsule(releaseScreen);
+        bool wasCapsule = (pressedCapsule || HitsCapsule(releaseScreen)) && !PetDialogue.Blocks(releaseScreen);
         pressedCapsule = false;
         if (!wasCapsule)
             return;
