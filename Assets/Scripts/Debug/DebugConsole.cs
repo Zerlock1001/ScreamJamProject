@@ -521,6 +521,14 @@ namespace ScreamJam.Debugging
             };
         }
 
+        public static void WriteLine(string message)
+        {
+            if (_instance == null || string.IsNullOrEmpty(message))
+                return;
+
+            _instance.AddCommandLine(message);
+        }
+
         private void PrintHelp()
         {
             AddCommandLine("Available commands (" + Commands.Count + "):");

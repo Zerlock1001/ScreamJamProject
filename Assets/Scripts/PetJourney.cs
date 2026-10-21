@@ -1,10 +1,12 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
+using ScreamJam.Debugging;
 using UnityEngine;
 using UnityEngine.UI;
 
 /// <summary>
-/// 远行：角色缩小离开，一段时间后回来，带回占位 meme。
+/// 远行：播放 JourneyStart 后离开，途中把明信片发到手机。回来后说一句，不再展示带回了什么。
 /// 第一次离开 30 秒，之后每次多 1 分钟。
 /// </summary>
 public class PetJourney : MonoBehaviour
@@ -24,7 +26,8 @@ public class PetJourney : MonoBehaviour
     [SerializeField] float extraSecondsPerTrip = 60f;
     [SerializeField] float moodRecoverSeconds = 60f;
     [SerializeField] float newsDelaySeconds = 30f;
-    [SerializeField] string returnLine = "I brought something back for you.";
+    [SerializeField] string returnLine = "I'm back! I brought you quite a few photos. Remember to check your phone.";
+    [SerializeField] string restLine = "I need to rest for a bit now.";
     [SerializeField] string tiredLine = "I'm a little tired. I need to rest.";
     [SerializeField] string newsLine = "Today's news";
     [SerializeField] string newsUrl = "https://itch.io";
@@ -41,12 +44,22 @@ public class PetJourney : MonoBehaviour
     bool returning;
     bool departing;
     bool waitingForDialogue;
+    bool arrivalLineQueued;
     bool newsShown;
+    Coroutine moodShake;
+    RectTransform moodWidget;
+    Vector2 moodRestPosition;
+    bool moodRestCached;
     long returnAtTicks;
     long moodReadyAtTicks;
     float returnSecondsLeft = -1f;
     bool returnCountdownArmed;
+    Coroutine postcardRoutine;
     Sprite[] memeSprites;
+    Button galleryButton;
+    GameObject galleryPanel;
+    readonly List<Sprite> collectedMemes = new List<Sprite>();
+    bool browsingGallery;
 
     void Awake()
     {
@@ -58,13 +71,19 @@ public class PetJourney : MonoBehaviour
         if (homeScale.sqrMagnitude < 0.0001f)
             homeScale = Vector3.one;
 
+        DebugConsole.RegisterCommand("skip", "/skip", "End the current journey and bring Blinky back now.", _ => SkipJourney());
+
         tripCount = LoadInt(TripCountKey);
         returnAtTicks = LoadTicks(ReturnAtKey);
         moodReadyAtTicks = LoadTicks(MoodReadyKey);
         newsShown = LoadInt(NewsSeenKey) != 0;
         BindJourneyButton();
+        BindGalleryButton();
         BindMoodBar();
         CreateMemePopup();
+        CreateGallery();
+        SetJourneyButtonVisible(false);
+        SetGalleryButtonVisible(false);
 
         if (returnAtTicks > 0)
         {
@@ -94,6 +113,8 @@ public class PetJourney : MonoBehaviour
     void Update()
     {
         RefreshMoodBar();
+        if (waitingForDialogue && PetDialogue.Instance != null && !PetDialogue.Instance.IsOpen)
+            waitingForDialogue = false;
         TryShowNews();
 
         if (away && !returning)
@@ -108,23 +129,19 @@ public class PetJourney : MonoBehaviour
                 returnCountdownArmed = false;
                 returnAtTicks = 0;
                 ClearReturnAt();
+                if (postcardRoutine != null)
+                {
+                    StopCoroutine(postcardRoutine);
+                    postcardRoutine = null;
+                }
                 StartCoroutine(ReturnHome());
             }
         }
-
-        if (!waitingForDialogue)
-            return;
-
-        if (PetDialogue.Instance != null && PetDialogue.Instance.IsOpen)
-            return;
-
-        waitingForDialogue = false;
-        ShowMeme(0);
     }
 
     void TryShowNews()
     {
-        if (newsShown || tripCount != 1 || moodReadyAtTicks <= 0 || away)
+        if (newsShown || tripCount != 1 || moodReadyAtTicks <= 0 || away || arrivalLineQueued)
             return;
         if (waitingForDialogue || (memePopup != null && memePopup.activeSelf))
             return;
@@ -135,7 +152,15 @@ public class PetJourney : MonoBehaviour
 
         newsShown = true;
         SaveInt(NewsSeenKey, 1);
-        PetDialogue.SayLink(newsLine + "\n" + newsUrl, newsUrl);
+        PetDialogue.SayLink(newsLine + "\nTrump ties $5,000 checks to a Republican win", NewsPageUrl());
+    }
+
+    string NewsPageUrl()
+    {
+        string path = System.IO.Path.Combine(Application.streamingAssetsPath, "News", "trump-greenville-rally.html");
+        if (System.IO.File.Exists(path))
+            return new System.Uri(path).AbsoluteUri;
+        return newsUrl;
     }
 
     static long SecondsToTicks(float seconds)
@@ -152,6 +177,7 @@ public class PetJourney : MonoBehaviour
         {
             if (!PetDialogue.HasPendingLink)
                 PetDialogue.SayOnce(tiredLine);
+            ShakeMood();
             return;
         }
 
@@ -162,10 +188,45 @@ public class PetJourney : MonoBehaviour
         SaveString(ReturnAtKey, returnAtTicks.ToString());
         ArmReturnCountdown(duration);
         away = true;
+        PetPhone.Ensure();
+        if (PetPhone.Instance != null)
+            PetPhone.Instance.SetAway(true);
+        if (postcardRoutine != null)
+            StopCoroutine(postcardRoutine);
+        postcardRoutine = StartCoroutine(SendPostcards(duration));
         departing = true;
         returning = false;
+        browsingGallery = false;
+        if (galleryPanel != null)
+            galleryPanel.SetActive(false);
+        if (memePopup != null)
+            memePopup.SetActive(false);
         SetJourneyButtonVisible(false);
+        if (PetDialogue.Instance != null)
+            PetDialogue.Instance.CloseForJourney();
         StartCoroutine(Depart());
+    }
+
+    static void SkipJourney()
+    {
+        if (Instance == null || !Instance.away)
+        {
+            DebugConsole.WriteLine("Blinky is not out on a journey.");
+            return;
+        }
+
+        if (Instance.returning)
+        {
+            DebugConsole.WriteLine("Blinky is already on the way back.");
+            return;
+        }
+
+        Instance.returnSecondsLeft = 0f;
+        Instance.returnCountdownArmed = true;
+        Instance.returnAtTicks = DateTime.UtcNow.Ticks;
+        DebugConsole.WriteLine(Instance.departing
+            ? "Trip skipped. Blinky will head back once the leave animation finishes."
+            : "Trip skipped. Blinky is heading back.");
     }
 
     void ArmReturnCountdown(float seconds)
@@ -186,9 +247,125 @@ public class PetJourney : MonoBehaviour
         if (PetDialogue.Instance != null)
             PetDialogue.Instance.Hide();
 
-        Vector3 start = pet != null ? pet.transform.localScale : homeScale;
+        if (PetAnimator() != null)
+            yield return PlayState("JourneyStart");
+        else
+            yield return ScalePet(CurrentScale(), Vector3.zero);
+
+        if (pet != null)
+            pet.enabled = false;
+
+        departing = false;
+        if (tripCount == 1)
+            yield return IntroducePhone();
+    }
+
+    IEnumerator IntroducePhone()
+    {
+        yield return new WaitForSecondsRealtime(2f);
+        PetPhone.ShowButton();
+        if (PetPhone.Instance == null)
+            yield break;
+
+        PetPhone.Instance.SetOpen(true);
+        string name = PetDialogue.HasPlayerName ? PetDialogue.PlayerName : "there";
+        PetPhone.Instance.AddMessage("Hi, " + name + ". If I run into anything interesting while I'm out, I'll send it to you through this. Remember to check.");
+    }
+
+    IEnumerator ReturnHome()
+    {
+        BeginRest();
+        arrivalLineQueued = true;
+
+        if (pet != null)
+            pet.enabled = true;
+
+        if (PetAnimator() != null)
+            yield return PlayState("JourneyEnd");
+        else
+            yield return ScalePet(Vector3.zero, homeScale);
+
+        if (PetPhone.Instance != null)
+            PetPhone.Instance.SetAway(false);
+        returning = false;
+        SetJourneyButtonVisible(true);
+        arrivalLineQueued = false;
+        if (PetDialogue.Instance != null)
+        {
+            PetDialogue.SayLines(returnLine, restLine);
+            waitingForDialogue = true;
+        }
+    }
+
+    Animator PetAnimator()
+    {
+        if (pet != null)
+        {
+            Animator onPet = pet.GetComponent<Animator>();
+            if (onPet != null && onPet.runtimeAnimatorController != null)
+                return onPet;
+        }
+
+        Animator animator = GetComponent<Animator>();
+        if (animator != null && animator.runtimeAnimatorController != null)
+            return animator;
+        return null;
+    }
+
+    IEnumerator PlayState(string stateName)
+    {
+        Animator animator = PetAnimator();
+        if (animator == null)
+            yield break;
+
+        animator.Play(stateName, 0, 0f);
+        animator.Update(0f);
+
+        float length = ClipLength(animator, stateName);
+        float timeout = Mathf.Max(length, 0.05f) + 0.25f;
+        float elapsed = 0f;
+        bool seen = false;
+        while (elapsed < timeout)
+        {
+            AnimatorStateInfo info = animator.GetCurrentAnimatorStateInfo(0);
+            bool playing = info.IsName(stateName) && info.normalizedTime < 1f;
+            if (playing)
+                seen = true;
+            else if (seen)
+                break;
+
+            yield return null;
+            elapsed += Time.unscaledDeltaTime;
+        }
+
+        animator.Play("Idle", 0, 0f);
+        animator.Update(0f);
+    }
+
+    static float ClipLength(Animator animator, string clipName)
+    {
+        AnimationClip[] clips = animator.runtimeAnimatorController.animationClips;
+        for (int i = 0; i < clips.Length; i++)
+        {
+            if (clips[i] != null && clips[i].name == clipName)
+                return clips[i].length;
+        }
+
+        return 0f;
+    }
+
+    Vector3 CurrentScale()
+    {
+        if (pet == null)
+            return homeScale;
+        Vector3 start = pet.transform.localScale;
         if (start.sqrMagnitude < 0.0001f)
-            start = homeScale;
+            return homeScale;
+        return start;
+    }
+
+    IEnumerator ScalePet(Vector3 from, Vector3 to)
+    {
         float shrink = Mathf.Max(0.05f, shrinkSeconds);
         float elapsed = 0f;
         while (elapsed < shrink)
@@ -196,43 +373,34 @@ public class PetJourney : MonoBehaviour
             elapsed += Time.unscaledDeltaTime;
             float t = Mathf.Clamp01(elapsed / shrink);
             if (pet != null)
-                pet.transform.localScale = Vector3.Lerp(start, Vector3.zero, t);
+                pet.transform.localScale = Vector3.Lerp(from, to, t);
             yield return null;
         }
 
         if (pet != null)
-        {
-            pet.enabled = false;
-            pet.transform.localScale = homeScale;
-        }
-
-        departing = false;
+            pet.transform.localScale = to;
     }
 
-    IEnumerator ReturnHome()
+    IEnumerator SendPostcards(float duration)
     {
-        BeginRest();
+        EnsureMemeSprites();
+        if (memeSprites == null || memeSprites.Length == 0)
+            yield break;
 
-        if (pet != null)
+        float started = Time.unscaledTime;
+        int count = memeSprites.Length;
+        for (int i = 0; i < count; i++)
         {
-            pet.enabled = true;
-            pet.transform.localScale = Vector3.zero;
-            float shrink = Mathf.Max(0.05f, shrinkSeconds);
-            float elapsed = 0f;
-            while (elapsed < shrink)
-            {
-                elapsed += Time.unscaledDeltaTime;
-                float t = Mathf.Clamp01(elapsed / shrink);
-                pet.transform.localScale = Vector3.Lerp(Vector3.zero, homeScale, t);
+            float sendAt = duration * (i + 1f) / (count + 1f);
+            while (away && Time.unscaledTime - started < sendAt)
                 yield return null;
-            }
+            if (!away)
+                yield break;
 
-            pet.enabled = true;
-            pet.transform.localScale = homeScale;
+            RememberMeme(memeSprites[i]);
+            if (PetPhone.Instance != null)
+                PetPhone.Instance.AddPostcard(memeSprites[i], "Postcard " + (i + 1));
         }
-
-        PetDialogue.SayOnce(returnLine);
-        waitingForDialogue = true;
     }
 
     void ShowMeme(int index)
@@ -242,16 +410,30 @@ public class PetJourney : MonoBehaviour
             return;
 
         EnsureMemeSprites();
+        if (galleryPanel != null)
+            galleryPanel.SetActive(false);
         memePopup.SetActive(true);
         memePopup.transform.SetAsLastSibling();
-        if (memeImage != null && index >= 0 && index < memeSprites.Length)
-            memeImage.sprite = memeSprites[index];
+        if (index >= 0 && index < memeSprites.Length)
+        {
+            RememberMeme(memeSprites[index]);
+            if (memeImage != null)
+                memeImage.sprite = memeSprites[index];
+        }
         if (memeLabel != null)
             memeLabel.text = "Meme " + (index + 1);
     }
 
     void OnMemeClicked()
     {
+        if (browsingGallery)
+        {
+            browsingGallery = false;
+            if (memePopup != null)
+                memePopup.SetActive(false);
+            return;
+        }
+
         int next = memeIndex + 1;
         if (next < memeCount)
         {
@@ -263,6 +445,12 @@ public class PetJourney : MonoBehaviour
             memePopup.SetActive(false);
         returning = false;
         SetJourneyButtonVisible(true);
+    }
+
+    void RememberMeme(Sprite sprite)
+    {
+        if (sprite != null && !collectedMemes.Contains(sprite))
+            collectedMemes.Add(sprite);
     }
 
     float CurrentMood()
@@ -311,6 +499,59 @@ public class PetJourney : MonoBehaviour
         RefreshMoodBar();
     }
 
+    void ShakeMood()
+    {
+        if (moodWidget == null)
+            moodWidget = FindMoodWidget();
+        if (moodWidget == null)
+            return;
+
+        if (!moodRestCached)
+        {
+            moodRestPosition = moodWidget.anchoredPosition;
+            moodRestCached = true;
+        }
+
+        if (moodShake != null)
+            StopCoroutine(moodShake);
+        moodWidget.anchoredPosition = moodRestPosition;
+        moodShake = StartCoroutine(ShakeMoodRoutine());
+    }
+
+    RectTransform FindMoodWidget()
+    {
+        if (moodFill == null)
+            return null;
+
+        Transform node = moodFill.transform;
+        while (node != null)
+        {
+            if (node.name == "Mood")
+                return node as RectTransform;
+            node = node.parent;
+        }
+
+        return moodFill.rectTransform;
+    }
+
+    IEnumerator ShakeMoodRoutine()
+    {
+        const float duration = 0.38f;
+        const float amplitude = 10f;
+        float elapsed = 0f;
+        while (elapsed < duration)
+        {
+            float damp = 1f - elapsed / duration;
+            float offset = Mathf.Sin(elapsed * 46f) * amplitude * damp;
+            moodWidget.anchoredPosition = moodRestPosition + new Vector2(offset, 0f);
+            elapsed += Time.unscaledDeltaTime;
+            yield return null;
+        }
+
+        moodWidget.anchoredPosition = moodRestPosition;
+        moodShake = null;
+    }
+
     void BindJourneyButton()
     {
         if (journeyButton == null)
@@ -321,14 +562,7 @@ public class PetJourney : MonoBehaviour
 
     static Button FindJourneyButton()
     {
-        var buttons = FindObjectsOfType<Button>(true);
-        for (int i = 0; i < buttons.Length; i++)
-        {
-            if (buttons[i].gameObject.name == "Journey")
-                return buttons[i];
-        }
-
-        return null;
+        return FindNamedButton("Journey");
     }
 
     void CreateMemePopup()
@@ -442,6 +676,182 @@ public class PetJourney : MonoBehaviour
         texture.SetPixels(pixels);
         texture.Apply();
         return Sprite.Create(texture, new Rect(0f, 0f, size, size), new Vector2(0.5f, 0.5f), 100f);
+    }
+
+    void BindGalleryButton()
+    {
+        if (galleryButton == null)
+            galleryButton = FindNamedButton("Collections");
+        if (galleryButton != null)
+            galleryButton.onClick.AddListener(ToggleGallery);
+    }
+
+    static Button FindNamedButton(string objectName)
+    {
+        var buttons = FindObjectsOfType<Button>(true);
+        for (int i = 0; i < buttons.Length; i++)
+        {
+            if (buttons[i].gameObject.name == objectName)
+                return buttons[i];
+        }
+
+        return null;
+    }
+
+    void CreateGallery()
+    {
+        if (galleryPanel != null)
+            return;
+
+        Transform parent = galleryButton != null ? galleryButton.transform.parent : null;
+        if (parent == null)
+        {
+            Canvas canvas = PetDialogue.OverlayCanvas();
+            if (canvas == null)
+                return;
+            parent = canvas.transform;
+        }
+
+        galleryPanel = new GameObject("Gallery", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        galleryPanel.transform.SetParent(parent, false);
+        var rect = galleryPanel.GetComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0.5f, 0.5f);
+        rect.anchorMax = new Vector2(0.5f, 0.5f);
+        rect.pivot = new Vector2(0.5f, 0.5f);
+        rect.sizeDelta = new Vector2(248f, 108f);
+        var background = galleryPanel.GetComponent<Image>();
+        background.color = new Color(0.99f, 0.96f, 0.9f, 1f);
+        background.raycastTarget = true;
+        var buttonImage = galleryButton != null ? galleryButton.GetComponent<Image>() : null;
+        if (buttonImage != null && buttonImage.sprite != null)
+        {
+            background.sprite = buttonImage.sprite;
+            background.type = Image.Type.Sliced;
+        }
+
+        galleryPanel.SetActive(false);
+    }
+
+    public void OpenGallery()
+    {
+        if (galleryPanel == null)
+            CreateGallery();
+        if (galleryPanel == null)
+            return;
+
+        if (!galleryPanel.activeSelf)
+        {
+            var rect = galleryPanel.GetComponent<RectTransform>();
+            rect.anchorMin = new Vector2(0f, 0.5f);
+            rect.anchorMax = new Vector2(0f, 0.5f);
+            rect.pivot = new Vector2(0f, 0.5f);
+            rect.anchoredPosition = new Vector2(340f, 0f);
+            galleryPanel.SetActive(true);
+            galleryPanel.transform.SetAsLastSibling();
+            RebuildGallery();
+            return;
+        }
+
+        galleryPanel.SetActive(false);
+        browsingGallery = false;
+        if (memePopup != null)
+            memePopup.SetActive(false);
+    }
+
+    void ToggleGallery()
+    {
+        if (galleryPanel == null || returning || waitingForDialogue)
+            return;
+
+        bool open = !galleryPanel.activeSelf;
+        galleryPanel.SetActive(open);
+        if (open)
+        {
+            galleryPanel.transform.SetAsLastSibling();
+            RebuildGallery();
+        }
+        else if (browsingGallery)
+        {
+            browsingGallery = false;
+            if (memePopup != null)
+                memePopup.SetActive(false);
+        }
+    }
+
+    void RebuildGallery()
+    {
+        for (int i = galleryPanel.transform.childCount - 1; i >= 0; i--)
+            Destroy(galleryPanel.transform.GetChild(i).gameObject);
+
+        int count = collectedMemes.Count;
+        if (count == 0)
+        {
+            galleryPanel.GetComponent<RectTransform>().sizeDelta = new Vector2(220f, 72f);
+            var emptyObject = new GameObject("Empty", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text));
+            emptyObject.transform.SetParent(galleryPanel.transform, false);
+            var emptyRect = emptyObject.GetComponent<RectTransform>();
+            emptyRect.anchorMin = Vector2.zero;
+            emptyRect.anchorMax = Vector2.one;
+            emptyRect.offsetMin = new Vector2(8f, 8f);
+            emptyRect.offsetMax = new Vector2(-8f, -8f);
+            var emptyText = emptyObject.GetComponent<Text>();
+            emptyText.font = BuiltinFont();
+            emptyText.fontSize = 14;
+            emptyText.alignment = TextAnchor.MiddleCenter;
+            emptyText.color = new Color(0.24f, 0.16f, 0.12f, 1f);
+            emptyText.raycastTarget = false;
+            emptyText.text = "No postcards yet.";
+            return;
+        }
+
+        float slot = 68f;
+        float width = Mathf.Max(108f, count * slot + 24f);
+        galleryPanel.GetComponent<RectTransform>().sizeDelta = new Vector2(width, 108f);
+        for (int i = 0; i < count; i++)
+        {
+            int index = i;
+            var thumbObject = new GameObject("Meme" + (i + 1), typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
+            thumbObject.transform.SetParent(galleryPanel.transform, false);
+            var thumbRect = thumbObject.GetComponent<RectTransform>();
+            thumbRect.anchorMin = new Vector2(0f, 0.5f);
+            thumbRect.anchorMax = new Vector2(0f, 0.5f);
+            thumbRect.pivot = new Vector2(0f, 0.5f);
+            thumbRect.sizeDelta = new Vector2(60f, 60f);
+            thumbRect.anchoredPosition = new Vector2(16f + i * slot, 0f);
+            var image = thumbObject.GetComponent<Image>();
+            image.sprite = collectedMemes[i];
+            image.preserveAspect = true;
+            image.raycastTarget = true;
+            var thumbButton = thumbObject.GetComponent<Button>();
+            thumbButton.targetGraphic = image;
+            thumbButton.onClick.AddListener(() => ViewCollected(index));
+        }
+    }
+
+    void ViewCollected(int index)
+    {
+        if (memePopup == null || index < 0 || index >= collectedMemes.Count)
+            return;
+
+        browsingGallery = true;
+        memePopup.SetActive(true);
+        memePopup.transform.SetAsLastSibling();
+        if (memeImage != null)
+            memeImage.sprite = collectedMemes[index];
+        if (memeLabel != null)
+            memeLabel.text = "Meme " + (index + 1);
+    }
+
+    void SetGalleryButtonVisible(bool visible)
+    {
+        if (galleryButton != null)
+            galleryButton.gameObject.SetActive(visible);
+    }
+
+    public static void ShowJourneyButton()
+    {
+        if (Instance != null)
+            Instance.SetJourneyButtonVisible(true);
     }
 
     void SetJourneyButtonVisible(bool visible)
