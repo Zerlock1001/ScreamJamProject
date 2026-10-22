@@ -57,6 +57,11 @@ public class PetDialogue : MonoBehaviour
     Vector2 pressScreen;
     GameObject namePrompt;
     InputField nameInput;
+    Vector3 namePromptHomePosition;
+    Coroutine namePromptMoveRoutine;
+    Coroutine namePromptAppearRoutine;
+    Transform petRoot;
+    static Sprite promptPanelSprite;
     Transform headBubble;
     Vector3 headLocalOffset;
     bool headPoseCached;
@@ -129,6 +134,7 @@ public class PetDialogue : MonoBehaviour
     void Awake()
     {
         Instance = this;
+        EnsurePetRoot();
         if (speaker == null)
             speaker = GetComponent<SpriteRenderer>();
         if (speaker != null)
@@ -142,8 +148,28 @@ public class PetDialogue : MonoBehaviour
         Hide();
     }
 
+    void EnsurePetRoot()
+    {
+        if (petRoot != null)
+            return;
+
+        // The Animator owns Character.localPosition (Enter/Journey clips animate it).
+        // Move a parent instead, otherwise those animation curves overwrite our offset.
+        Transform parent = transform.parent;
+        GameObject rootObject = new GameObject("BlinkyMotionRoot");
+        petRoot = rootObject.transform;
+        petRoot.SetParent(parent, false);
+        petRoot.localPosition = Vector3.zero;
+        petRoot.localRotation = Quaternion.identity;
+        petRoot.localScale = Vector3.one;
+        transform.SetParent(petRoot, true);
+    }
+
     void OnDestroy()
     {
+        if (namePrompt != null)
+            Destroy(namePrompt);
+
         if (Instance == this)
             Instance = null;
     }
@@ -347,6 +373,8 @@ public class PetDialogue : MonoBehaviour
 
     void ShowNamePrompt()
     {
+        namePromptHomePosition = petRoot != null ? petRoot.localPosition : Vector3.zero;
+
         Canvas canvas = OverlayCanvas();
         if (canvas == null)
         {
@@ -354,41 +382,283 @@ public class PetDialogue : MonoBehaviour
             return;
         }
 
-        namePrompt = new GameObject("NamePrompt", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        namePrompt = new GameObject(
+            "NamePrompt",
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(Image),
+            typeof(CanvasGroup));
         namePrompt.transform.SetParent(canvas.transform, false);
+        namePrompt.transform.SetAsLastSibling();
+
         var panelRect = namePrompt.GetComponent<RectTransform>();
         panelRect.anchorMin = new Vector2(0.5f, 0.5f);
         panelRect.anchorMax = new Vector2(0.5f, 0.5f);
         panelRect.pivot = new Vector2(0.5f, 0.5f);
-        panelRect.sizeDelta = new Vector2(260f, 148f);
+        panelRect.anchoredPosition = Vector2.zero;
+        panelRect.sizeDelta = new Vector2(340f, 190f);
+        panelRect.localScale = new Vector3(0.82f, 0.82f, 1f);
+
         var panelImage = namePrompt.GetComponent<Image>();
-        panelImage.color = new Color(0.99f, 0.96f, 0.9f, 1f);
+        panelImage.sprite = PromptPanelSprite();
+        panelImage.type = Image.Type.Sliced;
+        panelImage.color = Color.white;
         panelImage.raycastTarget = true;
+
+        var shadow = namePrompt.AddComponent<Shadow>();
+        shadow.effectColor = new Color(0f, 0f, 0f, 0.35f);
+        shadow.effectDistance = new Vector2(0f, -4f);
+
+        var panelGroup = namePrompt.GetComponent<CanvasGroup>();
+        panelGroup.alpha = 0f;
+
+        GameObject accent = new GameObject("Accent", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        accent.transform.SetParent(namePrompt.transform, false);
+        var accentRect = accent.GetComponent<RectTransform>();
+        accentRect.anchorMin = new Vector2(0.08f, 1f);
+        accentRect.anchorMax = new Vector2(0.92f, 1f);
+        accentRect.pivot = new Vector2(0.5f, 1f);
+        accentRect.anchoredPosition = new Vector2(0f, -10f);
+        accentRect.sizeDelta = new Vector2(0f, 3f);
+        accent.GetComponent<Image>().color = new Color(0.93f, 0.55f, 0.42f, 1f);
+        accent.GetComponent<Image>().raycastTarget = false;
 
         Font font = BuiltinFont();
         CreatePromptLabel(namePrompt.transform, font);
         nameInput = CreatePromptInput(namePrompt.transform, font);
         CreatePromptButton(namePrompt.transform, font);
+
+        namePromptAppearRoutine = StartCoroutine(AnimateNamePrompt(panelRect, panelGroup));
+        namePromptMoveRoutine = StartCoroutine(MovePetForNamePrompt());
         StartCoroutine(FocusNameInput());
+    }
+
+    IEnumerator AnimateNamePrompt(RectTransform panel, CanvasGroup panelGroup)
+    {
+        const float duration = 0.26f;
+        float elapsed = 0f;
+
+        while (elapsed < duration)
+        {
+            elapsed += Time.unscaledDeltaTime;
+            float t = Mathf.Clamp01(elapsed / duration);
+            float scale = Mathf.LerpUnclamped(0.82f, 1f, EaseOutBack(t));
+
+            if (panel != null)
+                panel.localScale = new Vector3(scale, scale, 1f);
+
+            if (panelGroup != null)
+                panelGroup.alpha = Mathf.Clamp01(t * 2f);
+
+            yield return null;
+        }
+
+        if (panel != null)
+            panel.localScale = Vector3.one;
+
+        if (panelGroup != null)
+            panelGroup.alpha = 1f;
+    }
+
+    IEnumerator MovePetForNamePrompt()
+    {
+        if (petRoot == null)
+            yield break;
+
+        Vector3 start = namePromptHomePosition;
+        float distance = NamePromptWorldDistance();
+        Vector3 target = start + Vector3.left * distance;
+
+        if (cam != null && cam.orthographic)
+        {
+            float aspect = Mathf.Max(0.01f, cam.aspect);
+            float halfWidth = cam.orthographicSize * aspect;
+            target.x = Mathf.Max(target.x, -halfWidth + 1.2f);
+        }
+
+        UnityEngine.Debug.Log($"[NamePrompt] root move start={start} target={target} distance={distance:0.###} screen={Screen.width} aspect={(cam != null ? cam.aspect : -1f):0.###}");
+
+        yield return MovePetTo(target, 1f);
+
+        UnityEngine.Debug.Log($"[NamePrompt] root move done={petRoot.localPosition}");
+    }
+
+    IEnumerator ReturnFromNamePrompt()
+    {
+        yield return MovePetTo(namePromptHomePosition, 1f);
+
+        if (speaker != null && !PetJourney.PetIsAway)
+            speaker.enabled = true;
+
+        openingBeat = OpeningBeat.Greet;
+        Show("Hello, " + PlayerName + ".");
+    }
+
+    IEnumerator MovePetTo(Vector3 target, float duration)
+    {
+        if (petRoot == null)
+            yield break;
+
+        Vector3 start = petRoot.localPosition;
+        float elapsed = 0f;
+        float safeDuration = Mathf.Max(0.01f, duration);
+
+        while (elapsed < safeDuration)
+        {
+            elapsed += Time.unscaledDeltaTime;
+            float t = Mathf.Clamp01(elapsed / safeDuration);
+            float eased = Mathf.SmoothStep(0f, 1f, t);
+            petRoot.localPosition = Vector3.LerpUnclamped(start, target, eased);
+            yield return null;
+        }
+
+        petRoot.localPosition = target;
+    }
+
+    float NamePromptWorldDistance()
+    {
+        if (namePrompt == null || cam == null)
+            return 3f;
+
+        var rect = namePrompt.GetComponent<RectTransform>();
+        Canvas canvas = namePrompt.GetComponentInParent<Canvas>();
+        float scale = canvas != null && canvas.scaleFactor > 0.01f ? canvas.scaleFactor : 1f;
+        float pixelWidth = rect != null ? rect.rect.width * scale : 0f;
+        float aspect = Mathf.Max(0.01f, cam.aspect);
+        float worldWidth = cam.orthographic ? cam.orthographicSize * 2f * aspect : 10f;
+        return Mathf.Max(2f, pixelWidth / Mathf.Max(1, Screen.width) * worldWidth);
+    }
+
+    static float EaseOutBack(float t)
+    {
+        const float c1 = 1.70158f;
+        const float c3 = c1 + 1f;
+        float p = t - 1f;
+        return 1f + c3 * p * p * p + c1 * p * p;
+    }
+
+    static Sprite PromptPanelSprite()
+    {
+        if (promptPanelSprite != null)
+            return promptPanelSprite;
+
+        const int size = 64;
+        const int radius = 14;
+        const int border = 2;
+
+        var texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        texture.hideFlags = HideFlags.HideAndDontSave;
+        texture.filterMode = FilterMode.Bilinear;
+        texture.wrapMode = TextureWrapMode.Clamp;
+
+        var pixels = new Color32[size * size];
+        Color32 clear = new Color32(0, 0, 0, 0);
+        Color32 fill = new Color32(248, 239, 224, 255);
+        Color32 edge = new Color32(92, 58, 40, 255);
+
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                int cx = x < radius ? radius - x - 1 : (x >= size - radius ? x - (size - radius) : 0);
+                int cy = y < radius ? radius - y - 1 : (y >= size - radius ? y - (size - radius) : 0);
+                bool outsideCorner = cx > 0 && cy > 0 && cx * cx + cy * cy > radius * radius;
+                if (outsideCorner)
+                {
+                    pixels[y * size + x] = clear;
+                    continue;
+                }
+
+                bool nearEdge = x < border || y < border || x >= size - border || y >= size - border;
+                bool nearCorner = (cx > 0 && cy > 0) &&
+                                  (cx >= radius - border || cy >= radius - border);
+                pixels[y * size + x] = nearEdge || nearCorner ? edge : fill;
+            }
+        }
+
+        texture.SetPixels32(pixels);
+        texture.Apply(false, false);
+
+        promptPanelSprite = Sprite.Create(
+            texture,
+            new Rect(0f, 0f, size, size),
+            new Vector2(0.5f, 0.5f),
+            100f,
+            0,
+            SpriteMeshType.FullRect,
+            new Vector4(16f, 16f, 16f, 16f));
+        promptPanelSprite.hideFlags = HideFlags.HideAndDontSave;
+        return promptPanelSprite;
     }
 
     void CreatePromptLabel(Transform parent, Font font)
     {
-        var labelObject = new GameObject("Label", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text));
-        labelObject.transform.SetParent(parent, false);
-        var rect = labelObject.GetComponent<RectTransform>();
-        rect.anchorMin = new Vector2(0f, 1f);
-        rect.anchorMax = new Vector2(1f, 1f);
-        rect.pivot = new Vector2(0.5f, 1f);
-        rect.anchoredPosition = new Vector2(0f, -12f);
-        rect.sizeDelta = new Vector2(-24f, 36f);
-        var label = labelObject.GetComponent<Text>();
-        label.font = font;
-        label.fontSize = 15;
-        label.alignment = TextAnchor.MiddleCenter;
-        label.color = new Color(0.24f, 0.16f, 0.12f, 1f);
-        label.text = "Your name";
-        label.raycastTarget = false;
+        CreatePromptText(
+            parent,
+            "Title",
+            "What's your name?",
+            font,
+            20,
+            FontStyle.Bold,
+            TextAnchor.MiddleCenter,
+            new Color(0.24f, 0.16f, 0.12f, 1f),
+            new Vector2(0f, 1f),
+            new Vector2(1f, 1f),
+            new Vector2(0.5f, 1f),
+            new Vector2(0f, -20f),
+            new Vector2(-36f, 32f));
+
+        CreatePromptText(
+            parent,
+            "Subtitle",
+            "Blinky will remember this.",
+            font,
+            12,
+            FontStyle.Italic,
+            TextAnchor.MiddleCenter,
+            new Color(0.46f, 0.34f, 0.26f, 1f),
+            new Vector2(0f, 1f),
+            new Vector2(1f, 1f),
+            new Vector2(0.5f, 1f),
+            new Vector2(0f, -52f),
+            new Vector2(-40f, 22f));
+    }
+
+    static Text CreatePromptText(
+        Transform parent,
+        string name,
+        string value,
+        Font font,
+        int fontSize,
+        FontStyle fontStyle,
+        TextAnchor alignment,
+        Color color,
+        Vector2 anchorMin,
+        Vector2 anchorMax,
+        Vector2 pivot,
+        Vector2 anchoredPosition,
+        Vector2 sizeDelta)
+    {
+        var textObject = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Text));
+        textObject.transform.SetParent(parent, false);
+
+        var rect = textObject.GetComponent<RectTransform>();
+        rect.anchorMin = anchorMin;
+        rect.anchorMax = anchorMax;
+        rect.pivot = pivot;
+        rect.anchoredPosition = anchoredPosition;
+        rect.sizeDelta = sizeDelta;
+
+        var text = textObject.GetComponent<Text>();
+        text.font = font;
+        text.fontSize = fontSize;
+        text.fontStyle = fontStyle;
+        text.alignment = alignment;
+        text.color = color;
+        text.supportRichText = false;
+        text.raycastTarget = false;
+        text.text = value;
+        return text;
     }
 
     InputField CreatePromptInput(Transform parent, Font font)
@@ -399,21 +669,27 @@ public class PetDialogue : MonoBehaviour
         rect.anchorMin = new Vector2(0.5f, 0.5f);
         rect.anchorMax = new Vector2(0.5f, 0.5f);
         rect.pivot = new Vector2(0.5f, 0.5f);
-        rect.anchoredPosition = new Vector2(0f, 4f);
-        rect.sizeDelta = new Vector2(220f, 32f);
-        var image = inputObject.GetComponent<Image>();
-        image.color = new Color(1f, 1f, 1f, 1f);
+        rect.anchoredPosition = new Vector2(0f, -8f);
+        rect.sizeDelta = new Vector2(260f, 38f);
 
-        var text = CreateInputText(inputObject.transform, font, "Text", new Color(0.2f, 0.14f, 0.1f, 1f), FontStyle.Normal);
+        var image = inputObject.GetComponent<Image>();
+        image.sprite = PromptPanelSprite();
+        image.type = Image.Type.Sliced;
+        image.color = Color.white;
+
+        var text = CreateInputText(inputObject.transform, font, "Text", new Color(0.20f, 0.14f, 0.10f, 1f), FontStyle.Normal);
         text.text = string.Empty;
         var placeholder = CreateInputText(inputObject.transform, font, "Placeholder", new Color(0.55f, 0.48f, 0.42f, 1f), FontStyle.Italic);
-        placeholder.text = "Username";
+        placeholder.text = "Type your name";
 
         var input = inputObject.GetComponent<InputField>();
+        input.targetGraphic = image;
         input.textComponent = text;
         input.placeholder = placeholder;
         input.lineType = InputField.LineType.SingleLine;
         input.characterLimit = 24;
+        input.caretColor = new Color(0.24f, 0.16f, 0.12f, 1f);
+        input.selectionColor = new Color(0.93f, 0.55f, 0.42f, 0.35f);
         input.onSubmit.AddListener(FinishNamePrompt);
         return input;
     }
@@ -425,11 +701,11 @@ public class PetDialogue : MonoBehaviour
         var rect = textObject.GetComponent<RectTransform>();
         rect.anchorMin = Vector2.zero;
         rect.anchorMax = Vector2.one;
-        rect.offsetMin = new Vector2(8f, 4f);
-        rect.offsetMax = new Vector2(-8f, -4f);
+        rect.offsetMin = new Vector2(12f, 4f);
+        rect.offsetMax = new Vector2(-12f, -4f);
         var text = textObject.GetComponent<Text>();
         text.font = font;
-        text.fontSize = 15;
+        text.fontSize = 16;
         text.fontStyle = style;
         text.alignment = TextAnchor.MiddleLeft;
         text.color = color;
@@ -446,28 +722,42 @@ public class PetDialogue : MonoBehaviour
         rect.anchorMin = new Vector2(0.5f, 0f);
         rect.anchorMax = new Vector2(0.5f, 0f);
         rect.pivot = new Vector2(0.5f, 0f);
-        rect.anchoredPosition = new Vector2(0f, 14f);
-        rect.sizeDelta = new Vector2(88f, 28f);
+        rect.anchoredPosition = new Vector2(0f, 18f);
+        rect.sizeDelta = new Vector2(116f, 34f);
+
         var image = buttonObject.GetComponent<Image>();
+        image.sprite = PromptPanelSprite();
+        image.type = Image.Type.Sliced;
         image.color = new Color(0.93f, 0.55f, 0.42f, 1f);
+        image.raycastTarget = true;
+
         var button = buttonObject.GetComponent<Button>();
         button.targetGraphic = image;
         button.onClick.AddListener(() => FinishNamePrompt(nameInput != null ? nameInput.text : string.Empty));
 
-        var labelObject = new GameObject("Label", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text));
-        labelObject.transform.SetParent(buttonObject.transform, false);
-        var labelRect = labelObject.GetComponent<RectTransform>();
-        labelRect.anchorMin = Vector2.zero;
-        labelRect.anchorMax = Vector2.one;
-        labelRect.offsetMin = Vector2.zero;
-        labelRect.offsetMax = Vector2.zero;
-        var label = labelObject.GetComponent<Text>();
-        label.font = font;
-        label.fontSize = 14;
-        label.alignment = TextAnchor.MiddleCenter;
-        label.color = new Color(0.24f, 0.14f, 0.1f, 1f);
-        label.text = "OK";
-        label.raycastTarget = false;
+        var label = CreatePromptText(
+            buttonObject.transform,
+            "Label",
+            "OK",
+            font,
+            15,
+            FontStyle.Bold,
+            TextAnchor.MiddleCenter,
+            new Color(0.24f, 0.14f, 0.10f, 1f),
+            Vector2.zero,
+            Vector2.one,
+            new Vector2(0.5f, 0.5f),
+            Vector2.zero,
+            Vector2.zero);
+        Stretch(label.rectTransform);
+    }
+
+    static void Stretch(RectTransform rect)
+    {
+        rect.anchorMin = Vector2.zero;
+        rect.anchorMax = Vector2.one;
+        rect.offsetMin = Vector2.zero;
+        rect.offsetMax = Vector2.zero;
     }
 
     IEnumerator FocusNameInput()
@@ -490,8 +780,20 @@ public class PetDialogue : MonoBehaviour
             return;
 
         PlayerName = name;
-        if (namePrompt != null)
-            Destroy(namePrompt);
+
+        if (namePromptMoveRoutine != null)
+        {
+            StopCoroutine(namePromptMoveRoutine);
+            namePromptMoveRoutine = null;
+        }
+
+        if (namePromptAppearRoutine != null)
+        {
+            StopCoroutine(namePromptAppearRoutine);
+            namePromptAppearRoutine = null;
+        }
+
+        GameObject closingPrompt = namePrompt;
         namePrompt = null;
         nameInput = null;
         if (PetPhone.Instance != null)
@@ -499,12 +801,54 @@ public class PetDialogue : MonoBehaviour
 
         if (speaker != null && !PetJourney.PetIsAway)
             speaker.enabled = true;
-        openingBeat = OpeningBeat.Greet;
-        Show("Hello, " + PlayerName + ".");
+
+        if (closingPrompt == null)
+        {
+            StartCoroutine(ReturnFromNamePrompt());
+            return;
+        }
+
+        var panel = closingPrompt.GetComponent<RectTransform>();
+        var group = closingPrompt.GetComponent<CanvasGroup>();
+        StartCoroutine(DismissNamePrompt(closingPrompt, panel, group));
+    }
+
+    IEnumerator DismissNamePrompt(GameObject prompt, RectTransform panel, CanvasGroup group)
+    {
+        const float duration = 0.2f;
+        float elapsed = 0f;
+        Vector3 startScale = panel != null ? panel.localScale : Vector3.one;
+        float startAlpha = group != null ? group.alpha : 1f;
+
+        while (elapsed < duration)
+        {
+            elapsed += Time.unscaledDeltaTime;
+            float t = Mathf.Clamp01(elapsed / duration);
+            float eased = Mathf.SmoothStep(0f, 1f, t);
+
+            if (panel != null)
+                panel.localScale = Vector3.LerpUnclamped(startScale, Vector3.one * 0.88f, eased);
+
+            if (group != null)
+                group.alpha = Mathf.Lerp(startAlpha, 0f, eased);
+
+            yield return null;
+        }
+
+        if (prompt != null)
+            Destroy(prompt);
+
+        StartCoroutine(ReturnFromNamePrompt());
     }
 
     IEnumerator AppearInCenter()
     {
+        if (petRoot != null)
+        {
+            petRoot.localPosition = Vector3.zero;
+            petRoot.localRotation = Quaternion.identity;
+        }
+
         transform.localPosition = Vector3.zero;
         transform.localRotation = Quaternion.identity;
         transform.localScale = Vector3.zero;
