@@ -111,6 +111,7 @@ namespace ScreamJam.Debugging
             RegisterCommand("record", "/record [play]", "Record 10s of microphone audio, or play the last recording.", HandleRecord);
             RegisterCommand("tempclear", "/tempclear", "Delete cached photos, screenshots, and recordings.", _ => ClearCachedFiles());
             RegisterCommand("ip", "/ip", "Show the player's approximate city.", _ => BeginIpLookup());
+            RegisterCommand("sayip", "/sayip", "Ask whether the player lives in their IP city.", _ => BeginSayIp());
             RegisterCommand("quit", "/quit", "Quit the game.", _ => QuitGame());
         }
 
@@ -216,6 +217,9 @@ namespace ScreamJam.Debugging
 
             _open = open;
 
+            if (open && _uguiRoot == null)
+                CreateUguiConsole();
+
             if (_uguiRoot != null)
             {
                 if (_open)
@@ -313,6 +317,9 @@ namespace ScreamJam.Debugging
                 Event.current.Use();
                 return;
             }
+
+            if (_uguiRoot != null)
+                return;
 
             if (!_open) return;
 

@@ -13,16 +13,35 @@ namespace ScreamJam.Debugging
 
         private void BeginIpLookup()
         {
+            StartIpLookup(null);
+        }
+
+        private void BeginSayIp()
+        {
+            StartIpLookup(result =>
+            {
+                if (result == null || string.IsNullOrEmpty(result.City))
+                {
+                    AddCommandLine("City not found in the IP lookup result.", LogType.Warning);
+                    return;
+                }
+
+                PetDialogue.SayOnce("Do you live in " + result.City.Trim() + "?");
+            });
+        }
+
+        private void StartIpLookup(Action<IpLocation> onResult)
+        {
             if (_ipLookupBusy)
             {
                 AddCommandLine("IP lookup is already running.", LogType.Warning);
                 return;
             }
 
-            StartCoroutine(LookupIpLocation());
+            StartCoroutine(LookupIpLocation(onResult));
         }
 
-        private IEnumerator LookupIpLocation()
+        private IEnumerator LookupIpLocation(Action<IpLocation> onResult)
         {
             _ipLookupBusy = true;
             _ipLookupError = null;
@@ -65,6 +84,12 @@ namespace ScreamJam.Debugging
                 }
 
                 IpLocation result = _ipLookupResult;
+
+                if (onResult != null)
+                {
+                    onResult(result);
+                    yield break;
+                }
 
                 AddCommandLine("City: " + (string.IsNullOrEmpty(result.City) ? "unknown" : result.City));
             }

@@ -17,11 +17,6 @@ namespace ScreamJam.Debugging
         private Font _uguiFont;
         private bool _uguiDirty = true;
 
-        private void Start()
-        {
-            CreateUguiConsole();
-        }
-
         private void CreateUguiConsole()
         {
             if (_uguiRoot != null)
@@ -359,8 +354,12 @@ namespace ScreamJam.Debugging
             if (_uguiInput == null)
                 return;
 
-            if (EventSystem.current != null)
-                EventSystem.current.SetSelectedGameObject(_uguiInput.gameObject);
+            EventSystem eventSystem = EventSystem.current;
+            if (eventSystem != null &&
+                eventSystem.currentSelectedGameObject != _uguiInput.gameObject)
+            {
+                eventSystem.SetSelectedGameObject(_uguiInput.gameObject);
+            }
 
             _uguiInput.ActivateInputField();
         }
