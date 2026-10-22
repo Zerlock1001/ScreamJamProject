@@ -9,6 +9,8 @@ using UnityEngine;
 /// </summary>
 public class CapsuleMenu : MonoBehaviour
 {
+    // Temporarily disabled: the menu options are still placeholders.
+    [SerializeField] bool enableMenu = false;
     [SerializeField] float clickSlopPixels = 12f;
     [SerializeField] float menuGap = 0.25f;
     [SerializeField] float hoverScale = 1.18f;
@@ -44,12 +46,19 @@ public class CapsuleMenu : MonoBehaviour
     {
         capsule = GetComponent<SpriteRenderer>();
         cam = Camera.main;
+
+        if (!enableMenu)
+            return;
+
         CreateMenu();
         SetMenuVisible(false);
     }
 
     void Update()
     {
+        if (!enableMenu)
+            return;
+
         if (cam == null)
             cam = Camera.main;
         if (capsule == null || cam == null || !PetDialogue.HasPlayerName)

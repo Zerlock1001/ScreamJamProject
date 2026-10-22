@@ -15,7 +15,7 @@ namespace ScreamJam.Debugging
     /// Lightweight in-game log console. Press `~` to toggle.
     /// It bootstraps itself at runtime, so no scene setup is required.
     /// </summary>
-    public sealed class DebugConsole : MonoBehaviour
+    public sealed partial class DebugConsole : MonoBehaviour
     {
         private const int MaxEntries = 500;
         private const int MaxDrainPerFrame = 64;
@@ -117,6 +117,12 @@ namespace ScreamJam.Debugging
         {
             Application.logMessageReceivedThreaded -= OnLogMessage;
 
+            if (_uguiRoot != null)
+            {
+                Destroy(_uguiRoot);
+                _uguiRoot = null;
+            }
+
             if (_instance == this)
                 _instance = null;
 
@@ -138,6 +144,8 @@ namespace ScreamJam.Debugging
 
         private void Update()
         {
+            UpdateUguiConsole();
+
             // KeyCode.BackQuote is the `~` key on a US keyboard layout.
             // OnGUI also checks this key, because a focused text field can
             // swallow the event in some situations. ToggleConsole de-dupes
@@ -207,6 +215,28 @@ namespace ScreamJam.Debugging
 
             _open = open;
 
+            if (_uguiRoot != null)
+            {
+                if (_open)
+                {
+                    _previousCursorVisible = Cursor.visible;
+                    _previousCursorLock = Cursor.lockState;
+                    Cursor.visible = true;
+                    Cursor.lockState = CursorLockMode.None;
+                    _uguiRoot.SetActive(true);
+                    _uguiDirty = true;
+                    RefreshUguiConsole();
+                    FocusUguiInput();
+                }
+                else
+                {
+                    _uguiRoot.SetActive(false);
+                    Cursor.visible = _previousCursorVisible;
+                    Cursor.lockState = _previousCursorLock;
+                }
+                return;
+            }
+
             if (_open)
             {
                 _previousCursorVisible = Cursor.visible;
@@ -233,6 +263,7 @@ namespace ScreamJam.Debugging
             while (drained < MaxDrainPerFrame && Pending.TryDequeue(out var entry))
             {
                 _entries.Add(entry);
+                _uguiDirty = true;
                 drained++;
             }
 
@@ -270,6 +301,9 @@ namespace ScreamJam.Debugging
 
         private void OnGUI()
         {
+            if (_uguiRoot != null)
+                return;
+
             // Catch `~` before the command text field can consume it.
             if (Event.current.type == EventType.KeyDown &&
                 Event.current.keyCode == KeyCode.BackQuote)
@@ -409,6 +443,9 @@ namespace ScreamJam.Debugging
             _entries.Clear();
             while (Pending.TryDequeue(out _)) { }
             _scroll = Vector2.zero;
+            if (_uguiInput != null)
+                _uguiInput.text = string.Empty;
+            _uguiDirty = true;
         }
 
         private void DestroyAllImageEntries()
@@ -427,6 +464,8 @@ namespace ScreamJam.Debugging
                 DestroyImage(_entries[i]);
                 _entries.RemoveAt(i);
             }
+
+            _uguiDirty = true;
         }
 
         private void DestroyImage(LogEntry entry)
@@ -616,6 +655,7 @@ namespace ScreamJam.Debugging
         private void AddEntry(LogEntry entry)
         {
             _entries.Add(entry);
+            _uguiDirty = true;
 
             if (_entries.Count > MaxEntries)
             {
@@ -1494,6 +1534,13 @@ namespace ScreamJam.Debugging
                 return new Color(0.55f, 0.85f, 1f, 1f);
 
             return new Color(0.86f, 0.88f, 0.9f, 1f);
+        }
+
+        private static string FormatEntry(LogEntry entry)
+        {
+            return entry.Time.ToString("HH:mm:ss.fff") +
+                   " [" + TagFor(entry) + "] " +
+                   entry.Message;
         }
 
         private static string TagFor(LogEntry entry)

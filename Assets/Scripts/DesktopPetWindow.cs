@@ -16,6 +16,8 @@ public class DesktopPetWindow : MonoBehaviour
     [SerializeField] int windowWidth = 360;
     [SerializeField] int windowHeight = 360;
     [SerializeField] bool alwaysOnTop = true;
+    // Uniform inset from the work-area edges. Values below MinScreenMargin are raised to it
+    // so the borderless window never exactly covers the work area; Windows may treat that as fullscreen.
     [SerializeField] int screenMargin = 24;
     [SerializeField] bool showPlaceholder = true;
     [SerializeField] float clickAlphaThreshold = 0.2f;
@@ -24,6 +26,7 @@ public class DesktopPetWindow : MonoBehaviour
     const int GwlStyle = -16;
     const int GwlExStyle = -20;
     const int GwlpWndProc = -4;
+    const int MinScreenMargin = 2;
 
     const int WsCaption = 0x00C00000;
     const int WsThickFrame = 0x00040000;
@@ -54,8 +57,6 @@ public class DesktopPetWindow : MonoBehaviour
     const int HtCaption = 0x2;
     const uint MonitorDefaultToPrimary = 1;
     const uint MonitorDefaultToNearest = 2;
-    const int SmCxScreen = 0;
-    const int SmCyScreen = 1;
 
     static readonly IntPtr HwndTopMost = new IntPtr(-1);
     static readonly IntPtr HwndNoTopMost = new IntPtr(-2);
@@ -111,6 +112,12 @@ public class DesktopPetWindow : MonoBehaviour
     float camAspect = 1f;
     int bufferWidth = 1;
     int bufferHeight = 1;
+    int lastScreenWidth = -1;
+    int lastScreenHeight = -1;
+    int lastWorkLeft = int.MinValue;
+    int lastWorkTop = int.MinValue;
+    int lastWorkWidth = -1;
+    int lastWorkHeight = -1;
     readonly List<SpriteSample> samples = new List<SpriteSample>();
     readonly Dictionary<int, Color32[]> pixelCache = new Dictionary<int, Color32[]>();
     readonly List<Rect> scratchUi = new List<Rect>();
@@ -171,6 +178,9 @@ public class DesktopPetWindow : MonoBehaviour
 
         if (Screen.fullScreenMode != FullScreenMode.Windowed)
             Screen.fullScreenMode = FullScreenMode.Windowed;
+
+        if (Screen.fullScreen || Screen.width != lastScreenWidth || Screen.height != lastScreenHeight)
+            ApplyAdaptiveWindow();
 
         TrackCurrentWindow();
         EnsureNotCoveringMonitor();
@@ -282,7 +292,9 @@ public class DesktopPetWindow : MonoBehaviour
     IEnumerator SetupWindow()
     {
         Screen.fullScreenMode = FullScreenMode.Windowed;
-        ClampBelowPrimaryMonitor(ref windowWidth, ref windowHeight);
+        ComputeAdaptiveWindow(out int targetWidth, out int targetHeight, out _, out _);
+        windowWidth = targetWidth;
+        windowHeight = targetHeight;
         if (Screen.fullScreen || Screen.width != windowWidth || Screen.height != windowHeight)
             Screen.SetResolution(windowWidth, windowHeight, FullScreenMode.Windowed);
 
@@ -303,6 +315,7 @@ public class DesktopPetWindow : MonoBehaviour
         ApplyBorderless(placeOnScreen: true);
         EnsureHook();
         ready = true;
+        RememberLayout();
 
         for (int i = 0; i < 30; i++)
         {
@@ -325,6 +338,7 @@ public class DesktopPetWindow : MonoBehaviour
         RestoreHook();
         hwnd = current;
         ApplyBorderless(placeOnScreen: false);
+        ApplyAdaptiveWindow();
         EnsureHook();
     }
 
@@ -366,23 +380,11 @@ public class DesktopPetWindow : MonoBehaviour
             return;
         }
 
-        int width = Mathf.Max(1, windowWidth);
-        int height = Mathf.Max(1, windowHeight);
-        int x = screenMargin;
-        int y = screenMargin;
-        var monitor = MonitorFromWindow(hwnd, MonitorDefaultToNearest);
-        var info = new MonitorInfo { cbSize = Marshal.SizeOf(typeof(MonitorInfo)) };
-        if (monitor != IntPtr.Zero && GetMonitorInfo(monitor, ref info))
-        {
-            FitInside(ref width, ref height, info.rcMonitor);
-            FitInside(ref width, ref height, info.rcWork);
-            x = info.rcWork.right - width - screenMargin;
-            y = info.rcWork.bottom - height - screenMargin;
-            x = Mathf.Clamp(x, info.rcWork.left, Mathf.Max(info.rcWork.left, info.rcWork.right - width));
-            y = Mathf.Clamp(y, info.rcWork.top, Mathf.Max(info.rcWork.top, info.rcWork.bottom - height));
-        }
-
+        ComputeAdaptiveWindow(out int width, out int height, out int x, out int y);
+        windowWidth = width;
+        windowHeight = height;
         SetWindowPos(hwnd, zOrder, x, y, width, height, SwpFrameChanged | SwpShowWindow);
+        RememberLayout();
     }
 
     void EnsureNotCoveringMonitor()
@@ -395,28 +397,120 @@ public class DesktopPetWindow : MonoBehaviour
         if (monitor == IntPtr.Zero || !GetMonitorInfo(monitor, ref info))
             return;
 
+        int workLeft = info.rcWork.left;
+        int workTop = info.rcWork.top;
+        int workWidth = Mathf.Max(1, info.rcWork.right - info.rcWork.left);
+        int workHeight = Mathf.Max(1, info.rcWork.bottom - info.rcWork.top);
+
+        if (workLeft != lastWorkLeft || workTop != lastWorkTop ||
+            workWidth != lastWorkWidth || workHeight != lastWorkHeight)
+        {
+            ApplyAdaptiveWindow();
+            return;
+        }
+
+        int margin = EffectiveScreenMargin;
+        int maxWidth = Mathf.Max(1, workWidth - margin * 2);
+        int maxHeight = Mathf.Max(1, workHeight - margin * 2);
+
         int width = window.right - window.left;
         int height = window.bottom - window.top;
-        int fittedWidth = width;
-        int fittedHeight = height;
-        FitInside(ref fittedWidth, ref fittedHeight, info.rcMonitor);
-        FitInside(ref fittedWidth, ref fittedHeight, info.rcWork);
-        int x = Mathf.Clamp(window.left, info.rcWork.left, Mathf.Max(info.rcWork.left, info.rcWork.right - fittedWidth));
-        int y = Mathf.Clamp(window.top, info.rcWork.top, Mathf.Max(info.rcWork.top, info.rcWork.bottom - fittedHeight));
-        bool coversMonitor = window.left <= info.rcMonitor.left
-            && window.top <= info.rcMonitor.top
-            && window.right >= info.rcMonitor.right
-            && window.bottom >= info.rcMonitor.bottom;
-        if (!coversMonitor && fittedWidth == width && fittedHeight == height && x == window.left && y == window.top)
+        int newWidth = Mathf.Min(width, maxWidth);
+        int newHeight = Mathf.Min(height, maxHeight);
+        int x = Mathf.Clamp(window.left, workLeft, Mathf.Max(workLeft, info.rcWork.right - newWidth));
+        int y = Mathf.Clamp(window.top, workTop, Mathf.Max(workTop, info.rcWork.bottom - newHeight));
+
+        if (newWidth == width && newHeight == height && x == window.left && y == window.top)
             return;
 
-        width = fittedWidth;
-        height = fittedHeight;
         IntPtr zOrder = alwaysOnTop ? HwndTopMost : HwndNoTopMost;
-        SetWindowPos(hwnd, zOrder, x, y, width, height, SwpFrameChanged | SwpShowWindow);
+        SetWindowPos(hwnd, zOrder, x, y, newWidth, newHeight, SwpFrameChanged | SwpShowWindow);
+        windowWidth = newWidth;
+        windowHeight = newHeight;
+        regionDirty = true;
+        RememberLayout();
+    }
+
+    int EffectiveScreenMargin => Mathf.Max(MinScreenMargin, screenMargin);
+
+    void ComputeAdaptiveWindow(out int width, out int height, out int x, out int y)
+    {
+        int margin = EffectiveScreenMargin;
+        int workLeft;
+        int workTop;
+        int workRight;
+        int workBottom;
+
+        var monitor = MonitorFromWindow(
+            hwnd,
+            hwnd == IntPtr.Zero ? MonitorDefaultToPrimary : MonitorDefaultToNearest);
+        var info = new MonitorInfo { cbSize = Marshal.SizeOf(typeof(MonitorInfo)) };
+
+        if (monitor != IntPtr.Zero && GetMonitorInfo(monitor, ref info))
+        {
+            workLeft = info.rcWork.left;
+            workTop = info.rcWork.top;
+            workRight = info.rcWork.right;
+            workBottom = info.rcWork.bottom;
+        }
+        else
+        {
+            workLeft = 0;
+            workTop = 0;
+            workRight = Mathf.Max(1, Screen.width);
+            workBottom = Mathf.Max(1, Screen.height);
+        }
+
+        int workWidth = Mathf.Max(1, workRight - workLeft);
+        int workHeight = Mathf.Max(1, workBottom - workTop);
+        width = Mathf.Max(1, workWidth - margin * 2);
+        height = Mathf.Max(1, workHeight - margin * 2);
+        x = Mathf.Clamp(
+            workRight - width - margin,
+            workLeft + margin,
+            Mathf.Max(workLeft + margin, workRight - width - margin));
+        y = Mathf.Clamp(
+            workBottom - height - margin,
+            workTop + margin,
+            Mathf.Max(workTop + margin, workBottom - height - margin));
+    }
+
+    void ApplyAdaptiveWindow()
+    {
+        if (hwnd == IntPtr.Zero)
+            return;
+
+        ComputeAdaptiveWindow(out int width, out int height, out int x, out int y);
+        if (!GetWindowRect(hwnd, out NativeRect current)
+            || current.left != x
+            || current.top != y
+            || current.right - current.left != width
+            || current.bottom - current.top != height)
+        {
+            IntPtr zOrder = alwaysOnTop ? HwndTopMost : HwndNoTopMost;
+            SetWindowPos(hwnd, zOrder, x, y, width, height, SwpFrameChanged | SwpShowWindow);
+        }
+
         windowWidth = width;
         windowHeight = height;
         regionDirty = true;
+        RememberLayout();
+    }
+
+    void RememberLayout()
+    {
+        lastScreenWidth = Screen.width;
+        lastScreenHeight = Screen.height;
+
+        var monitor = MonitorFromWindow(hwnd, MonitorDefaultToNearest);
+        var info = new MonitorInfo { cbSize = Marshal.SizeOf(typeof(MonitorInfo)) };
+        if (monitor == IntPtr.Zero || !GetMonitorInfo(monitor, ref info))
+            return;
+
+        lastWorkLeft = info.rcWork.left;
+        lastWorkTop = info.rcWork.top;
+        lastWorkWidth = info.rcWork.right - info.rcWork.left;
+        lastWorkHeight = info.rcWork.bottom - info.rcWork.top;
     }
 
     void UpdateClickThrough()
@@ -452,26 +546,6 @@ public class DesktopPetWindow : MonoBehaviour
         IntPtr zOrder = alwaysOnTop ? HwndTopMost : HwndNoTopMost;
         SetWindowPos(target, zOrder, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpFrameChanged | SwpShowWindow);
         return true;
-    }
-
-    static void FitInside(ref int width, ref int height, NativeRect area)
-    {
-        int areaWidth = area.right - area.left;
-        int areaHeight = area.bottom - area.top;
-        if (areaWidth > 1 && width >= areaWidth)
-            width = areaWidth - 1;
-        if (areaHeight > 1 && height >= areaHeight)
-            height = areaHeight - 1;
-    }
-
-    static void ClampBelowPrimaryMonitor(ref int width, ref int height)
-    {
-        int screenWidth = GetSystemMetrics(SmCxScreen);
-        int screenHeight = GetSystemMetrics(SmCyScreen);
-        if (screenWidth > 1 && width >= screenWidth)
-            width = screenWidth - 1;
-        if (screenHeight > 1 && height >= screenHeight)
-            height = screenHeight - 1;
     }
 
     void CacheHitData()
@@ -1117,9 +1191,6 @@ public class DesktopPetWindow : MonoBehaviour
 
     [DllImport("user32.dll")]
     static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-
-    [DllImport("user32.dll")]
-    static extern int GetSystemMetrics(int nIndex);
 
     [DllImport("user32.dll")]
     static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
