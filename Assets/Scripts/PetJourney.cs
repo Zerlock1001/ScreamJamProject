@@ -44,6 +44,7 @@ public class PetJourney : MonoBehaviour
     bool returning;
     bool departing;
     bool waitingForDialogue;
+    bool homeScriptPending;
     bool arrivalLineQueued;
     bool newsShown;
     Coroutine moodShake;
@@ -72,6 +73,8 @@ public class PetJourney : MonoBehaviour
             homeScale = Vector3.one;
 
         DebugConsole.RegisterCommand("skip", "/skip", "End the current journey and bring Blinky back now.", _ => SkipJourney());
+        DebugConsole.RegisterCommand("skipto", "/skipto X", "Set the number of completed journeys to X.", SkipToCommand);
+        DebugConsole.RegisterCommand("recover", "/recover mood", "Fill the mood bar immediately.", RecoverMoodCommand);
 
         tripCount = LoadInt(TripCountKey);
         returnAtTicks = LoadTicks(ReturnAtKey);
@@ -114,7 +117,14 @@ public class PetJourney : MonoBehaviour
     {
         RefreshMoodBar();
         if (waitingForDialogue && PetDialogue.Instance != null && !PetDialogue.Instance.IsOpen)
+        {
             waitingForDialogue = false;
+            if (homeScriptPending)
+            {
+                homeScriptPending = false;
+                PetCampaign.Ensure().BeginAfterFirstReturn();
+            }
+        }
         TryShowNews();
 
         if (away && !returning)
@@ -173,6 +183,9 @@ public class PetJourney : MonoBehaviour
         if (away || returning || departing || !PetDialogue.HasPlayerName)
             return;
 
+        if (PetCampaign.BlocksJourney)
+            return;
+
         if (CurrentMood() < 0.999f)
         {
             if (!PetDialogue.HasPendingLink)
@@ -196,6 +209,7 @@ public class PetJourney : MonoBehaviour
         postcardRoutine = StartCoroutine(SendPostcards(duration));
         departing = true;
         returning = false;
+        PetCampaign.Ensure().OnTripStarted(tripCount, duration);
         browsingGallery = false;
         if (galleryPanel != null)
             galleryPanel.SetActive(false);
@@ -205,6 +219,140 @@ public class PetJourney : MonoBehaviour
         if (PetDialogue.Instance != null)
             PetDialogue.Instance.CloseForJourney();
         StartCoroutine(Depart());
+    }
+
+    static void RecoverMoodCommand(string[] args)
+    {
+        if (args == null || args.Length != 1 || !string.Equals(args[0], "mood", StringComparison.OrdinalIgnoreCase))
+        {
+            DebugConsole.WriteLine("Usage: /recover mood");
+            return;
+        }
+
+        if (Instance == null)
+            return;
+
+        Instance.RecoverMood();
+        DebugConsole.WriteLine("Mood restored.");
+    }
+
+    public void RecoverMood()
+    {
+        moodReadyAtTicks = 0;
+        if (keepProgressBetweenLaunches)
+        {
+            PlayerPrefs.DeleteKey(MoodReadyKey);
+            PlayerPrefs.Save();
+        }
+
+        RefreshMoodBar();
+    }
+
+    public void SetBodyVisible(bool visible)
+    {
+        if (pet != null)
+            pet.enabled = visible;
+    }
+
+    public void ShowCollections()
+    {
+        SetGalleryButtonVisible(true);
+    }
+
+    public void SetJourneyAvailable(bool visible)
+    {
+        SetJourneyButtonVisible(visible);
+    }
+
+    public string PageUrl()
+    {
+        return NewsPageUrl();
+    }
+
+    public bool HitsPet(Vector2 screenPoint)
+    {
+        if (pet == null || !pet.enabled)
+            return false;
+
+        Camera cam = Camera.main;
+        if (cam == null)
+            return false;
+
+        Bounds bounds = pet.bounds;
+        float depth = Mathf.Abs(cam.transform.position.z - bounds.center.z);
+        Vector3 world = cam.ScreenToWorldPoint(new Vector3(screenPoint.x, screenPoint.y, depth));
+        return bounds.Contains(new Vector3(world.x, world.y, bounds.center.z));
+    }
+
+    static void SkipToCommand(string[] args)
+    {
+        if (Instance == null)
+            return;
+
+        int count;
+        if (args == null || args.Length != 1 || !int.TryParse(args[0], out count) || count < 0)
+        {
+            DebugConsole.WriteLine("Usage: /skipto X");
+            return;
+        }
+
+        Instance.SkipToCompleted(count);
+        DebugConsole.WriteLine("Completed journeys: " + count + ". Next trip is " + (count + 1) + ". " + PetStory.PhaseLabel(PetStory.Current) + ".");
+    }
+
+    public void SkipToCompleted(int count)
+    {
+        StopAllCoroutines();
+        postcardRoutine = null;
+        tripCount = Mathf.Max(0, count);
+        SaveInt(TripCountKey, tripCount);
+        away = false;
+        returning = false;
+        departing = false;
+        homeScriptPending = false;
+        arrivalLineQueued = false;
+        returnCountdownArmed = false;
+        returnSecondsLeft = -1f;
+        returnAtTicks = 0;
+        ClearReturnAt();
+        if (tripCount >= 1)
+        {
+            newsShown = true;
+            SaveInt(NewsSeenKey, 1);
+        }
+
+        RecoverMood();
+        if (pet != null)
+        {
+            pet.enabled = true;
+            if (homeScale.sqrMagnitude > 0.0001f)
+                pet.transform.localScale = homeScale;
+        }
+
+        Animator animator = PetAnimator();
+        if (animator != null)
+        {
+            animator.Play("Idle", 0, 0f);
+            animator.Update(0f);
+        }
+
+        if (PetPhone.Instance != null)
+            PetPhone.Instance.SetAway(false);
+        if (tripCount >= 1)
+        {
+            PetPhone.ShowButton();
+            ShowCollections();
+            SetJourneyAvailable(true);
+        }
+
+        if (galleryPanel != null)
+            galleryPanel.SetActive(false);
+        if (memePopup != null)
+            memePopup.SetActive(false);
+
+        PetCampaign.Ensure().SnapToCompleted(tripCount);
+        if (PetDialogue.Instance != null && PetDialogue.Instance.IsOpen)
+            PetDialogue.Instance.Hide();
     }
 
     static void SkipJourney()
@@ -276,6 +424,7 @@ public class PetJourney : MonoBehaviour
     {
         BeginRest();
         arrivalLineQueued = true;
+        PetCampaign.Ensure().FlushTripLines();
 
         if (pet != null)
             pet.enabled = true;
@@ -290,11 +439,14 @@ public class PetJourney : MonoBehaviour
         returning = false;
         SetJourneyButtonVisible(true);
         arrivalLineQueued = false;
-        if (PetDialogue.Instance != null)
+        if (tripCount <= 1 && PetDialogue.Instance != null)
         {
             PetDialogue.SayLines(returnLine, restLine);
             waitingForDialogue = true;
+            homeScriptPending = true;
         }
+        else
+            PetCampaign.Ensure().OnReturned(tripCount);
     }
 
     Animator PetAnimator()

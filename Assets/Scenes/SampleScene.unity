@@ -615,8 +615,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a7c3e1b94d2f48e6b15c0d7a9e3f6b21, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  windowWidth: 1920
-  windowHeight: 1080
+  windowWidth: 1600
+  windowHeight: 800
   alwaysOnTop: 1
   screenMargin: 0
   showPlaceholder: 0
@@ -1969,8 +1969,9 @@ MonoBehaviour:
   extraSecondsPerTrip: 60
   moodRecoverSeconds: 60
   newsDelaySeconds: 30
-  returnLine: "I'm back! I brought you quite a few photos. Remember to check your phone."
-  restLine: "I need to rest for a bit now."
+  returnLine: I'm back! I brought you quite a few photos. Remember to check your
+    phone.
+  restLine: I need to rest for a bit now.
   tiredLine: I'm a little tired. I need to rest.
   newsLine: Today's news
   newsUrl: https://itch.io

@@ -49,6 +49,10 @@ public class PetDialogue : MonoBehaviour
     int sequenceIndex;
     string[] followupLines;
     int followupIndex;
+    bool emphasis;
+    float nudgeUntil;
+
+    public static event System.Action Closed;
     string clickUrl;
     string currentLine;
     Text sceneDialogueText;
@@ -82,15 +86,28 @@ public class PetDialogue : MonoBehaviour
 
     public static void SayLines(params string[] lines)
     {
+        Present(lines, false);
+    }
+
+    public static void SayEmphasis(string text)
+    {
+        Present(new[] { text }, true);
+    }
+
+    static void Present(string[] lines, bool emphasis)
+    {
         if (Instance == null || lines == null || lines.Length == 0)
             return;
 
         Instance.playingIntro = false;
         Instance.sequence = null;
         Instance.clickUrl = null;
+        Instance.emphasis = emphasis;
         Instance.followupLines = lines;
         Instance.followupIndex = 0;
         Instance.Show(lines[0]);
+        if (emphasis)
+            Instance.nudgeUntil = Time.unscaledTime + 0.6f;
     }
 
     public static void SayOnce(string text)
@@ -191,7 +208,10 @@ public class PetDialogue : MonoBehaviour
         }
 
         Vector3 scale = transform.lossyScale;
-        headBubble.position = transform.position + Vector3.Scale(headLocalOffset, scale);
+        Vector3 pos = transform.position + Vector3.Scale(headLocalOffset, scale);
+        if (Time.unscaledTime < nudgeUntil)
+            pos.x += Mathf.Sin(Time.unscaledTime * 42f) * 0.22f;
+        headBubble.position = pos;
         headBubble.rotation = Quaternion.identity;
     }
 
@@ -1017,7 +1037,10 @@ public class PetDialogue : MonoBehaviour
             return;
 
         ApplyStoryStyle();
-        dialogueText.text = content;
+        dialogueText.resizeTextForBestFit = !emphasis;
+        if (emphasis)
+            dialogueText.fontSize = 32;
+        dialogueText.text = PetStory.ApplyName(content);
         if (headBubble != null)
             headBubble.gameObject.SetActive(true);
         else
@@ -1027,10 +1050,12 @@ public class PetDialogue : MonoBehaviour
 
     public void Hide()
     {
+        bool wasVisible = visible;
         visible = false;
         pressedBubble = false;
         clickUrl = null;
         followupLines = null;
+        emphasis = false;
         if (PetPhone.Instance != null)
             PetPhone.Instance.HideSpeech();
         if (headBubble != null)
@@ -1038,6 +1063,8 @@ public class PetDialogue : MonoBehaviour
         else if (dialogueBox != null)
             dialogueBox.gameObject.SetActive(false);
         PlayPose("Idle");
+        if (wasVisible && Closed != null)
+            Closed();
     }
 
     void BindDialogue()

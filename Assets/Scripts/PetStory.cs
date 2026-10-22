@@ -2,7 +2,7 @@ using ScreamJam.Debugging;
 using UnityEngine;
 
 /// <summary>
-/// 剧情状态。切换条件先记在这里，死亡、喂食和结局还没有接到这些条件上。
+/// 剧情状态。第一次远行回来之后由 PetCampaign 往下推进。
 /// </summary>
 public class PetStory : MonoBehaviour
 {
@@ -18,6 +18,37 @@ public class PetStory : MonoBehaviour
 
     public static PetStory Instance { get; private set; }
     public static Phase Current { get; private set; } = Phase.Normal;
+    public const string RefuseSpeech = "You closed the eye. The desk is all that answers.";
+
+    public static void SetPhase(Phase phase)
+    {
+        Current = phase;
+    }
+
+    public static string ApplyName(string line)
+    {
+        if (string.IsNullOrEmpty(line))
+            return line;
+        if (Current == Phase.Refused)
+            return RefuseSpeech;
+
+        string name = PetDialogue.HasPlayerName ? PetDialogue.PlayerName : "you";
+        if (Current == Phase.StateIII || Current == Phase.Final)
+            return line.Replace("{Name}", name).Replace("{name}", name);
+        if (Current == Phase.StateII)
+        {
+            string occasional = (line.Length + PlayerNameSalt()) % 2 == 0 ? name : "you";
+            return line.Replace("{Name}", name).Replace("{name}", occasional);
+        }
+
+        return line.Replace("{Name}", "you").Replace("{name}", "you");
+    }
+
+    static int PlayerNameSalt()
+    {
+        string name = PetDialogue.HasPlayerName ? PetDialogue.PlayerName : string.Empty;
+        return name.Length;
+    }
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     static void Ensure()
@@ -71,7 +102,8 @@ public class PetStory : MonoBehaviour
         DebugConsole.WriteLine("状态 III — 全部使用玩家名，频繁涉及隐私与邪教。第九、十次远行给出控制台指令，进入结局选择。");
         DebugConsole.WriteLine("最终态 — 选择加入后，从远行库和常规库里不重复抽取。");
         DebugConsole.WriteLine("拒绝结局 — 全部文本被替换，并在桌面留下 txt。");
-        DebugConsole.WriteLine("死亡、喂食、控制台解锁和结局都还没有接入，所以现在不会离开普通态。");
+        DebugConsole.WriteLine("第一次远行回来之后，图库、喂食、玩耍、死亡、复活、饥饿和结局会按次数往下走。");
+        DebugConsole.WriteLine("状态 II 偶尔把 {name} 换成玩家名。状态 III 和加入结局每次都用玩家名。");
     }
 
     static string NameRule(Phase phase)

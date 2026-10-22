@@ -191,6 +191,22 @@ public class PetPhone : MonoBehaviour
         StartCoroutine(ScrollToBottom());
     }
 
+    public void RemoveLastPostcard()
+    {
+        if (chatContent == null)
+            return;
+
+        for (int i = chatContent.childCount - 1; i >= 0; i--)
+        {
+            Transform row = chatContent.GetChild(i);
+            if (row.name != "PostcardRow")
+                continue;
+
+            Destroy(row.gameObject);
+            return;
+        }
+    }
+
     public void AddPostcard(Sprite picture, string caption)
     {
         if (chatContent == null)
