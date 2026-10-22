@@ -17,14 +17,20 @@ public class PetPhone : MonoBehaviour
     ScrollRect chatScroll;
     RectTransform chatContent;
     GameObject visual;
+    CanvasGroup phoneGroup;
     Button launcher;
     int pictureWindows;
     GameObject nameRow;
     InputField nameInput;
     Action<string> nameSubmitted;
+    bool phoneOpen;
+    Coroutine phoneAnimRoutine;
 
     const float PhoneWidth = 380f;
     const float PhoneHeight = 560f;
+    const float PhoneClosedScale = 0.88f;
+    const float PhoneOpenSeconds = 0.24f;
+    const float PhoneCloseSeconds = 0.18f;
     const float ShellInset = 14f;
     const float ScreenPadding = 10f;
     const float ChatPadLeft = 4f;
@@ -37,7 +43,7 @@ public class PetPhone : MonoBehaviour
     const int MessageFontSize = 14;
 
     public Text SpeechText => speechText;
-    public bool IsOpen => visual != null && visual.activeSelf;
+    public bool IsOpen => phoneOpen && visual != null;
 
     public static PetPhone Ensure()
     {
@@ -89,12 +95,99 @@ public class PetPhone : MonoBehaviour
 
     public void SetOpen(bool open)
     {
-        if (visual != null)
-            visual.SetActive(open);
-        if (open)
+        if (visual == null || open == phoneOpen)
+            return;
+
+        phoneOpen = open;
+
+        if (phoneAnimRoutine != null)
+        {
+            StopCoroutine(phoneAnimRoutine);
+            phoneAnimRoutine = null;
+        }
+
+        if (phoneOpen)
+        {
+            visual.SetActive(true);
+            phoneAnimRoutine = StartCoroutine(AnimatePhoneOpen());
             StartCoroutine(ScrollToBottom());
+        }
+        else
+        {
+            phoneAnimRoutine = StartCoroutine(AnimatePhoneClose());
+        }
+
         if (PetDialogue.Instance != null)
             PetDialogue.Instance.RefreshPlacement();
+    }
+
+    IEnumerator AnimatePhoneOpen()
+    {
+        var panel = visual != null ? visual.GetComponent<RectTransform>() : null;
+        if (panel == null)
+            yield break;
+
+        Vector3 fromScale = panel.localScale;
+        if (fromScale.x < 0.01f)
+            fromScale = Vector3.one * PhoneClosedScale;
+        float fromAlpha = phoneGroup != null ? phoneGroup.alpha : 1f;
+        float elapsed = 0f;
+
+        while (elapsed < PhoneOpenSeconds)
+        {
+            elapsed += Time.unscaledDeltaTime;
+            float t = Mathf.Clamp01(elapsed / PhoneOpenSeconds);
+            float eased = EaseOutBack(t);
+
+            panel.localScale = Vector3.LerpUnclamped(fromScale, Vector3.one, eased);
+            if (phoneGroup != null)
+                phoneGroup.alpha = Mathf.Lerp(fromAlpha, 1f, Mathf.Clamp01(eased));
+
+            yield return null;
+        }
+
+        panel.localScale = Vector3.one;
+        if (phoneGroup != null)
+            phoneGroup.alpha = 1f;
+        phoneAnimRoutine = null;
+    }
+
+    IEnumerator AnimatePhoneClose()
+    {
+        var panel = visual != null ? visual.GetComponent<RectTransform>() : null;
+        if (panel == null)
+            yield break;
+
+        Vector3 fromScale = panel.localScale;
+        float fromAlpha = phoneGroup != null ? phoneGroup.alpha : 1f;
+        float elapsed = 0f;
+
+        while (elapsed < PhoneCloseSeconds)
+        {
+            elapsed += Time.unscaledDeltaTime;
+            float t = Mathf.Clamp01(elapsed / PhoneCloseSeconds);
+            float eased = Mathf.SmoothStep(0f, 1f, t);
+
+            panel.localScale = Vector3.LerpUnclamped(fromScale, Vector3.one * PhoneClosedScale, eased);
+            if (phoneGroup != null)
+                phoneGroup.alpha = Mathf.Lerp(fromAlpha, 0f, eased);
+
+            yield return null;
+        }
+
+        panel.localScale = Vector3.one * PhoneClosedScale;
+        if (phoneGroup != null)
+            phoneGroup.alpha = 0f;
+        visual.SetActive(false);
+        phoneAnimRoutine = null;
+    }
+
+    static float EaseOutBack(float t)
+    {
+        const float c1 = 1.70158f;
+        const float c3 = c1 + 1f;
+        float p = t - 1f;
+        return 1f + c3 * p * p * p + c1 * p * p;
     }
 
     public void SetAway(bool away)
@@ -436,6 +529,9 @@ public class PetPhone : MonoBehaviour
         root.pivot = new Vector2(0f, 0.5f);
         root.anchoredPosition = new Vector2(28f, 0f);
         root.sizeDelta = new Vector2(PhoneWidth, PhoneHeight);
+        root.localScale = Vector3.one * PhoneClosedScale;
+        phoneGroup = panelObject.AddComponent<CanvasGroup>();
+        phoneGroup.alpha = 0f;
 
         var shell = CreatePanel("Shell", root, Skin(), new Color(0.16f, 0.16f, 0.18f, 1f));
         Stretch(shell, 0f);
