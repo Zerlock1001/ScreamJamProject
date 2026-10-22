@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using ScreamJam.Debugging;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 /// <summary>
@@ -17,6 +18,11 @@ public class PetJourney : MonoBehaviour
     const string ReturnAtKey = "PetJourney.ReturnAtTicks";
     const string MoodReadyKey = "PetJourney.MoodReadyAtTicks";
     const string NewsSeenKey = "PetJourney.NewsSeen";
+    const string NameKey = "PetDialogue.PlayerName";
+    const string BeatKey = "PetDialogue.OpeningBeat";
+    const string PhaseKey = "PetStory.Phase";
+    const string IntroducedKey = "PetCampaign.Introduced";
+    const string OfferKey = "PetCampaign.OfferUnlocked";
 
     [SerializeField] SpriteRenderer pet;
     [SerializeField] Button journeyButton;
@@ -32,7 +38,10 @@ public class PetJourney : MonoBehaviour
     [SerializeField] string newsLine = "Today's news";
     [SerializeField] string newsUrl = "https://itch.io";
     [SerializeField] int memeCount = 3;
-    [SerializeField] bool keepProgressBetweenLaunches;
+    [SerializeField] bool keepProgressBetweenLaunches = true;
+
+    public static bool SavesProgress => Instance != null && Instance.keepProgressBetweenLaunches;
+    public int CompletedTrips => tripCount;
 
     Vector3 homeScale = Vector3.one;
     GameObject memePopup;
@@ -46,6 +55,8 @@ public class PetJourney : MonoBehaviour
     bool waitingForDialogue;
     bool homeScriptPending;
     bool arrivalLineQueued;
+    Coroutine restNag;
+    const string RestNagLine = "I'm rested. When will you let me go find more memes for you?";
     bool newsShown;
     Coroutine moodShake;
     RectTransform moodWidget;
@@ -75,6 +86,7 @@ public class PetJourney : MonoBehaviour
         DebugConsole.RegisterCommand("skip", "/skip", "End the current journey and bring Blinky back now.", _ => SkipJourney());
         DebugConsole.RegisterCommand("skipto", "/skipto X", "Set the number of completed journeys to X.", SkipToCommand);
         DebugConsole.RegisterCommand("recover", "/recover mood", "Fill the mood bar immediately.", RecoverMoodCommand);
+        DebugConsole.RegisterCommand("remake", "/remake", "Erase the save and start the game over.", _ => Remake());
 
         tripCount = LoadInt(TripCountKey);
         returnAtTicks = LoadTicks(ReturnAtKey);
@@ -107,6 +119,33 @@ public class PetJourney : MonoBehaviour
         }
     }
 
+    void Start()
+    {
+        DebugConsole.CloseImmediate();
+
+        if (tripCount >= 1)
+        {
+            PetPhone.ShowButton();
+            if (PetPhone.Instance != null)
+                PetPhone.Instance.SetAway(away);
+        }
+
+        if (!away && tripCount == 1 && PetCampaign.Ensure().HasIntroduced)
+            BeginRestNag();
+
+        if (!away)
+            return;
+
+        PetPhone.Ensure();
+        if (PetPhone.Instance != null)
+            PetPhone.Instance.SetAway(true);
+
+        if (postcardRoutine != null)
+            StopCoroutine(postcardRoutine);
+        postcardRoutine = StartCoroutine(SendPostcards(Mathf.Max(1f, returnSecondsLeft)));
+        PetCampaign.Ensure().OnTripStarted(tripCount, Mathf.Max(1f, returnSecondsLeft));
+    }
+
     void OnDestroy()
     {
         if (Instance == this)
@@ -116,7 +155,7 @@ public class PetJourney : MonoBehaviour
     void Update()
     {
         RefreshMoodBar();
-        if (waitingForDialogue && PetDialogue.Instance != null && !PetDialogue.Instance.IsOpen)
+        if (waitingForDialogue && PetDialogue.Instance != null && !PetDialogue.Instance.IsOpen && !PetCampaign.BlocksJourney)
         {
             waitingForDialogue = false;
             if (homeScriptPending)
@@ -194,6 +233,7 @@ public class PetJourney : MonoBehaviour
             return;
         }
 
+        StopRestNag();
         float duration = Mathf.Max(1f, firstTripSeconds + tripCount * extraSecondsPerTrip);
         tripCount++;
         SaveInt(TripCountKey, tripCount);
@@ -236,6 +276,31 @@ public class PetJourney : MonoBehaviour
         DebugConsole.WriteLine("Mood restored.");
     }
 
+    static void Remake()
+    {
+        EraseSave();
+        PetDialogue.ClearSession();
+        PetStory.SetPhase(PetStory.Phase.Normal);
+        EraseSave();
+        DebugConsole.WriteLine("Save erased. Starting over.");
+        SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+    }
+
+    public static void EraseSave()
+    {
+        PlayerPrefs.DeleteKey(TripCountKey);
+        PlayerPrefs.DeleteKey(ReturnAtKey);
+        PlayerPrefs.DeleteKey(MoodReadyKey);
+        PlayerPrefs.DeleteKey(NewsSeenKey);
+        PlayerPrefs.DeleteKey(NameKey);
+        PlayerPrefs.DeleteKey(BeatKey);
+        PlayerPrefs.DeleteKey(PhaseKey);
+        PlayerPrefs.DeleteKey(IntroducedKey);
+        PlayerPrefs.DeleteKey(OfferKey);
+        PlayerPrefs.DeleteKey("PetDialogue.IntroSeen");
+        PlayerPrefs.Save();
+    }
+
     public void RecoverMood()
     {
         moodReadyAtTicks = 0;
@@ -256,7 +321,6 @@ public class PetJourney : MonoBehaviour
 
     public void ShowCollections()
     {
-        SetGalleryButtonVisible(true);
     }
 
     public void SetJourneyAvailable(bool visible)
@@ -372,6 +436,7 @@ public class PetJourney : MonoBehaviour
         Instance.returnSecondsLeft = 0f;
         Instance.returnCountdownArmed = true;
         Instance.returnAtTicks = DateTime.UtcNow.Ticks;
+        Instance.SaveString(ReturnAtKey, Instance.returnAtTicks.ToString());
         DebugConsole.WriteLine(Instance.departing
             ? "Trip skipped. Blinky will head back once the leave animation finishes."
             : "Trip skipped. Blinky is heading back.");
@@ -406,6 +471,8 @@ public class PetJourney : MonoBehaviour
         departing = false;
         if (tripCount == 1)
             yield return IntroducePhone();
+        else
+            PetPhone.ShowButton();
     }
 
     IEnumerator IntroducePhone()
@@ -441,9 +508,8 @@ public class PetJourney : MonoBehaviour
         arrivalLineQueued = false;
         if (tripCount <= 1 && PetDialogue.Instance != null)
         {
-            PetDialogue.SayLines(returnLine, restLine);
             waitingForDialogue = true;
-            homeScriptPending = true;
+            PetCampaign.Ensure().BeginAfterFirstReturn();
         }
         else
             PetCampaign.Ensure().OnReturned(tripCount);
@@ -539,8 +605,10 @@ public class PetJourney : MonoBehaviour
         if (memeSprites == null || memeSprites.Length == 0)
             yield break;
 
+        bool firstTrip = tripCount <= 1;
+        int count = firstTrip ? 4 : Mathf.Max(1, Mathf.Min(memeCount, memeSprites.Length));
+        string name = PetDialogue.HasPlayerName ? PetDialogue.PlayerName : "there";
         float started = Time.unscaledTime;
-        int count = memeSprites.Length;
         for (int i = 0; i < count; i++)
         {
             float sendAt = duration * (i + 1f) / (count + 1f);
@@ -549,9 +617,25 @@ public class PetJourney : MonoBehaviour
             if (!away)
                 yield break;
 
-            RememberMeme(memeSprites[i]);
+            Sprite sprite = memeSprites[i % memeSprites.Length];
+            RememberMeme(sprite);
             if (PetPhone.Instance != null)
-                PetPhone.Instance.AddPostcard(memeSprites[i], "Postcard " + (i + 1));
+                PetPhone.Instance.AddPostcard(sprite, firstTrip ? FirstMemeCaption(i, name) : "Postcard " + (i + 1));
+        }
+    }
+
+    static string FirstMemeCaption(int index, string name)
+    {
+        switch (index)
+        {
+            case 0:
+                return "Hey, " + name + ", look what I found!";
+            case 1:
+                return "I bet you'll like this.";
+            case 2:
+                return name + ", this is so interesting!";
+            default:
+                return "I have to show you this!";
         }
     }
 
@@ -624,6 +708,48 @@ public class PetJourney : MonoBehaviour
         moodReadyAtTicks = DateTime.UtcNow.AddSeconds(moodRecoverSeconds).Ticks;
         SaveString(MoodReadyKey, moodReadyAtTicks.ToString());
         RefreshMoodBar();
+    }
+
+    public void BeginRestNag()
+    {
+        StopRestNag();
+        restNag = StartCoroutine(RestNagRoutine());
+    }
+
+    void StopRestNag()
+    {
+        if (restNag == null)
+            return;
+
+        StopCoroutine(restNag);
+        restNag = null;
+    }
+
+    IEnumerator RestNagRoutine()
+    {
+        float waitUntil = Time.unscaledTime + 10f;
+        while (!away && tripCount == 1)
+        {
+            if (Time.unscaledTime < waitUntil || CurrentMood() < 0.999f || departing || returning)
+            {
+                yield return null;
+                continue;
+            }
+
+            if (PetCampaign.BlocksJourney || !PetDialogue.HasPlayerName || (PetDialogue.Instance != null && PetDialogue.Instance.IsOpen))
+            {
+                yield return null;
+                continue;
+            }
+
+            PetDialogue.SayOnce(RestNagLine);
+            float shownAt = Time.unscaledTime;
+            while (!away && tripCount == 1 && Time.unscaledTime < shownAt + 5f)
+                yield return null;
+
+            PetDialogue.HideIf(RestNagLine);
+            waitUntil = shownAt + 15f;
+        }
     }
 
     void RefreshMoodBar()
@@ -779,12 +905,13 @@ public class PetJourney : MonoBehaviour
         if (memeSprites != null)
             return;
 
-        memeSprites = new Sprite[Mathf.Max(1, memeCount)];
+        memeSprites = new Sprite[Mathf.Max(4, memeCount)];
         var colors = new[]
         {
             new Color(0.95f, 0.55f, 0.28f, 1f),
             new Color(0.35f, 0.62f, 0.9f, 1f),
-            new Color(0.45f, 0.75f, 0.42f, 1f)
+            new Color(0.45f, 0.75f, 0.42f, 1f),
+            new Color(0.72f, 0.38f, 0.78f, 1f)
         };
 
         for (int i = 0; i < memeSprites.Length; i++)
@@ -810,12 +937,15 @@ public class PetJourney : MonoBehaviour
                 float dx = x - center;
                 float dy = y - center;
                 bool mark = false;
-                if (pattern % 3 == 0)
+                int kind = pattern % 4;
+                if (kind == 0)
                     mark = dx * dx + dy * dy <= 28f * 28f;
-                else if (pattern % 3 == 1)
+                else if (kind == 1)
                     mark = Mathf.Abs(dx) <= 26f && Mathf.Abs(dy) <= 26f;
-                else
+                else if (kind == 2)
                     mark = dy > -30f && dy < 34f && Mathf.Abs(dx) < (34f - dy) * 0.7f;
+                else
+                    mark = Mathf.Abs(dx) + Mathf.Abs(dy) <= 36f;
 
                 Color pixel = mark ? color : paper;
                 pixel.r = Mathf.Max(pixel.r, 0.05f);
@@ -880,6 +1010,44 @@ public class PetJourney : MonoBehaviour
             background.sprite = buttonImage.sprite;
             background.type = Image.Type.Sliced;
         }
+        else
+        {
+            background.sprite = GallerySkin();
+            background.type = Image.Type.Simple;
+        }
+
+        var drag = galleryPanel.AddComponent<WindowDrag>();
+        drag.Target = rect;
+
+        var handleObject = new GameObject("Handle", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        handleObject.transform.SetParent(galleryPanel.transform, false);
+        var handleRect = handleObject.GetComponent<RectTransform>();
+        handleRect.anchorMin = new Vector2(0f, 1f);
+        handleRect.anchorMax = new Vector2(1f, 1f);
+        handleRect.pivot = new Vector2(0.5f, 1f);
+        handleRect.sizeDelta = new Vector2(0f, 28f);
+        handleRect.anchoredPosition = Vector2.zero;
+        var handleImage = handleObject.GetComponent<Image>();
+        handleImage.sprite = background.sprite;
+        handleImage.type = background.type;
+        handleImage.color = new Color(0.9f, 0.84f, 0.74f, 1f);
+        handleImage.raycastTarget = true;
+        var handleDrag = handleObject.AddComponent<WindowDrag>();
+        handleDrag.Target = rect;
+        var title = new GameObject("Title", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text));
+        title.transform.SetParent(handleObject.transform, false);
+        var titleRect = title.GetComponent<RectTransform>();
+        titleRect.anchorMin = Vector2.zero;
+        titleRect.anchorMax = Vector2.one;
+        titleRect.offsetMin = new Vector2(10f, 0f);
+        titleRect.offsetMax = new Vector2(-10f, 0f);
+        var titleText = title.GetComponent<Text>();
+        titleText.font = BuiltinFont();
+        titleText.fontSize = 14;
+        titleText.alignment = TextAnchor.MiddleLeft;
+        titleText.color = new Color(0.24f, 0.16f, 0.12f, 1f);
+        titleText.raycastTarget = false;
+        titleText.text = "Collections";
 
         galleryPanel.SetActive(false);
     }
@@ -897,7 +1065,7 @@ public class PetJourney : MonoBehaviour
             rect.anchorMin = new Vector2(0f, 0.5f);
             rect.anchorMax = new Vector2(0f, 0.5f);
             rect.pivot = new Vector2(0f, 0.5f);
-            rect.anchoredPosition = new Vector2(340f, 0f);
+            rect.anchoredPosition = new Vector2(424f, 0f);
             galleryPanel.SetActive(true);
             galleryPanel.transform.SetAsLastSibling();
             RebuildGallery();
@@ -933,19 +1101,24 @@ public class PetJourney : MonoBehaviour
     void RebuildGallery()
     {
         for (int i = galleryPanel.transform.childCount - 1; i >= 0; i--)
-            Destroy(galleryPanel.transform.GetChild(i).gameObject);
+        {
+            Transform child = galleryPanel.transform.GetChild(i);
+            if (child.name == "Handle")
+                continue;
+            Destroy(child.gameObject);
+        }
 
         int count = collectedMemes.Count;
         if (count == 0)
         {
-            galleryPanel.GetComponent<RectTransform>().sizeDelta = new Vector2(220f, 72f);
+            galleryPanel.GetComponent<RectTransform>().sizeDelta = new Vector2(220f, 100f);
             var emptyObject = new GameObject("Empty", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text));
             emptyObject.transform.SetParent(galleryPanel.transform, false);
             var emptyRect = emptyObject.GetComponent<RectTransform>();
             emptyRect.anchorMin = Vector2.zero;
             emptyRect.anchorMax = Vector2.one;
             emptyRect.offsetMin = new Vector2(8f, 8f);
-            emptyRect.offsetMax = new Vector2(-8f, -8f);
+            emptyRect.offsetMax = new Vector2(-8f, -32f);
             var emptyText = emptyObject.GetComponent<Text>();
             emptyText.font = BuiltinFont();
             emptyText.fontSize = 14;
@@ -958,7 +1131,7 @@ public class PetJourney : MonoBehaviour
 
         float slot = 68f;
         float width = Mathf.Max(108f, count * slot + 24f);
-        galleryPanel.GetComponent<RectTransform>().sizeDelta = new Vector2(width, 108f);
+        galleryPanel.GetComponent<RectTransform>().sizeDelta = new Vector2(width, 136f);
         for (int i = 0; i < count; i++)
         {
             int index = i;
@@ -969,7 +1142,7 @@ public class PetJourney : MonoBehaviour
             thumbRect.anchorMax = new Vector2(0f, 0.5f);
             thumbRect.pivot = new Vector2(0f, 0.5f);
             thumbRect.sizeDelta = new Vector2(60f, 60f);
-            thumbRect.anchoredPosition = new Vector2(16f + i * slot, 0f);
+            thumbRect.anchoredPosition = new Vector2(16f + i * slot, -12f);
             var image = thumbObject.GetComponent<Image>();
             image.sprite = collectedMemes[i];
             image.preserveAspect = true;
@@ -1049,6 +1222,25 @@ public class PetJourney : MonoBehaviour
             return;
         PlayerPrefs.DeleteKey(ReturnAtKey);
         PlayerPrefs.Save();
+    }
+
+    static Sprite gallerySkin;
+
+    static Sprite GallerySkin()
+    {
+        if (gallerySkin != null)
+            return gallerySkin;
+
+        var texture = new Texture2D(4, 4, TextureFormat.RGBA32, false);
+        var pixels = new Color[16];
+        for (int i = 0; i < pixels.Length; i++)
+            pixels[i] = Color.white;
+        texture.SetPixels(pixels);
+        texture.Apply();
+        texture.hideFlags = HideFlags.HideAndDontSave;
+        gallerySkin = Sprite.Create(texture, new Rect(0f, 0f, 4f, 4f), new Vector2(0.5f, 0.5f), 100f);
+        gallerySkin.hideFlags = HideFlags.HideAndDontSave;
+        return gallerySkin;
     }
 
     static Font BuiltinFont()

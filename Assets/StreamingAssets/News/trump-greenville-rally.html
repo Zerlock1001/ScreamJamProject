@@ -30,18 +30,7 @@
       padding: 28px 40px 56px;
       box-shadow: 0 12px 40px rgba(40, 30, 20, 0.12);
       overflow: hidden;
-    }
-
-    .page::before {
-      content: "";
-      position: absolute;
-      inset: 0;
-      pointer-events: none;
-      opacity: 0.22;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 640 360'%3E%3Cellipse cx='320' cy='180' rx='250' ry='130' fill='none' stroke='%23cfc6ba' stroke-width='10'/%3E%3Ccircle cx='320' cy='180' r='58' fill='none' stroke='%23cfc6ba' stroke-width='10'/%3E%3Ccircle cx='320' cy='180' r='22' fill='%23d5cdc3'/%3E%3C/svg%3E");
-      background-repeat: no-repeat;
-      background-position: center 46%;
-      background-size: 78% auto;
+      isolation: isolate;
     }
 
     .page > * { position: relative; }
@@ -51,15 +40,6 @@
       height: 18px;
       margin: 8px auto 0;
       display: block;
-    }
-
-    .seal {
-      margin: 4px 0 0;
-      font-family: "Segoe UI", Helvetica, Arial, sans-serif;
-      font-size: 9px;
-      letter-spacing: 0.28em;
-      text-transform: uppercase;
-      color: rgba(143, 29, 29, 0.55);
     }
 
     .masthead {
@@ -137,6 +117,10 @@
       margin: 22px 0 0;
     }
 
+    .photo {
+      position: relative;
+    }
+
     figure img {
       display: block;
       width: 100%;
@@ -144,6 +128,22 @@
       object-fit: cover;
       object-position: center 18%;
       background: #ddd;
+    }
+
+    .bg-eye {
+      position: absolute;
+      z-index: -1;
+      left: 0;
+      width: 100%;
+      aspect-ratio: 640 / 360;
+      top: 100%;
+      transform: translateY(-33.333%);
+      pointer-events: none;
+      opacity: 0.22;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 640 360'%3E%3Cellipse cx='320' cy='180' rx='250' ry='130' fill='none' stroke='%23cfc6ba' stroke-width='10'/%3E%3Ccircle cx='320' cy='180' r='58' fill='none' stroke='%23cfc6ba' stroke-width='10'/%3E%3Ccircle cx='320' cy='180' r='22' fill='%23d5cdc3'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: center;
+      background-size: 100% 100%;
     }
 
     figcaption {
@@ -206,9 +206,21 @@
 
     .classified .ad {
       display: flex;
-      gap: 12px;
+      gap: 22px;
       align-items: center;
-      margin-top: 8px;
+      margin-top: 10px;
+    }
+
+    .classified .portrait {
+      flex: 0 0 168px;
+      width: 168px;
+      height: 168px;
+      object-fit: contain;
+    }
+
+    .classified .copy {
+      flex: 1;
+      min-width: 0;
     }
 
     .classified strong {
@@ -223,11 +235,34 @@
       line-height: 1.4;
     }
 
-    .forecast {
-      margin-top: 14px;
+    .classified .tagline {
+      margin: 4px 0 0;
+      font-family: Georgia, "Iowan Old Style", Palatino, serif;
+      font-size: 16px;
+      font-style: italic;
+      line-height: 1.35;
+    }
+
+    .classified ul {
+      margin: 10px 0 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .classified li {
+      margin: 0;
+      padding: 2px 0;
+      font-family: Georgia, "Iowan Old Style", Palatino, serif;
+      font-size: 15px;
+      line-height: 1.35;
+    }
+
+    .classified .forecast {
+      margin-top: 12px;
       font-family: "Segoe UI", Helvetica, Arial, sans-serif;
       font-size: 12px;
-      letter-spacing: 0.04em;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
       color: var(--muted);
     }
 
@@ -253,6 +288,7 @@
       .masthead h1 { font-size: 28px; }
       h2 { font-size: 30px; }
       .tools { flex-direction: column; gap: 4px; }
+      .classified .ad { flex-direction: column; align-items: flex-start; }
     }
   </style>
 </head>
@@ -261,12 +297,6 @@
     <!-- Oculus Omnis. The first friend paid because he was afraid. Blinky is the door. -->
     <header class="masthead">
       <h1>The Harbor Ledger</h1>
-      <svg class="eye" viewBox="0 0 64 36" aria-hidden="true">
-        <ellipse cx="32" cy="18" rx="28" ry="14" fill="none" stroke="#8f1d1d" stroke-width="1.4"/>
-        <circle cx="32" cy="18" r="6" fill="none" stroke="#1a1a1a" stroke-width="1.4"/>
-        <circle cx="32" cy="18" r="2.4" fill="#8f1d1d"/>
-      </svg>
-      <p class="seal">Oculus Omnis</p>
       <p>Politics · Washington and the campaign trail</p>
     </header>
     <div class="tools">
@@ -280,7 +310,10 @@
     <p class="byline"><strong>By the Harbor Ledger staff</strong> · Updated 9:40 a.m. ET</p>
 
     <figure>
-      <img src="trump-official-portrait.jpg" alt="Official portrait of President Donald J. Trump">
+      <div class="photo">
+        <img src="trump-official-portrait.jpg" alt="Official portrait of President Donald J. Trump">
+        <div class="bg-eye" aria-hidden="true"></div>
+      </div>
       <figcaption>President Donald J. Trump. Official White House photograph by Daniel Torok, June 2025. U.S. government work, public domain. The portrait is not from the Greenville rally.</figcaption>
     </figure>
 
@@ -298,19 +331,20 @@
     </aside>
 
     <aside class="classified">
-      <h3>Notices</h3>
+      <h3>Advertisement</h3>
       <div class="ad">
-        <svg class="eye" viewBox="0 0 64 36" aria-hidden="true">
-          <ellipse cx="32" cy="18" rx="28" ry="14" fill="none" stroke="#8f1d1d" stroke-width="1.6"/>
-          <circle cx="32" cy="18" r="6" fill="none" stroke="#1a1a1a" stroke-width="1.6"/>
-          <circle cx="32" cy="18" r="2.4" fill="#8f1d1d"/>
-        </svg>
-        <div>
+        <img class="portrait" src="3.png" alt="Blinky, the desktop pet">
+        <div class="copy">
           <strong>BLINKY</strong>
-          <p>A little eye for your desktop. Curious where your friends are, and who they talk to? It already is. Free to look. The seeing comes after.</p>
+          <p class="tagline">The desktop pet that goes out, and comes home with memes.</p>
+          <ul>
+            <li>One button, and he's on the road.</li>
+            <li>He writes when he finds something good.</li>
+            <li>A friend for the corner of the screen.</li>
+          </ul>
+          <p class="forecast">Keep him. Send him. See what he brings back.</p>
         </div>
       </div>
-      <p class="forecast">Tomorrow is already written. Those who watch are kept. The offering is monthly.</p>
     </aside>
 
     <footer>

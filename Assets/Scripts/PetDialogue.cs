@@ -56,6 +56,12 @@ public class PetDialogue : MonoBehaviour
     string clickUrl;
     string currentLine;
     Text sceneDialogueText;
+    Action onChoiceYes;
+    Action onChoiceNo;
+    bool choiceOpen;
+    int pressedChoice;
+    Button choiceYes;
+    Button choiceNo;
 
     public static Sprite PortraitSprite { get; private set; }
     Vector2 pressScreen;
@@ -103,6 +109,7 @@ public class PetDialogue : MonoBehaviour
         Instance.sequence = null;
         Instance.clickUrl = null;
         Instance.emphasis = emphasis;
+        Instance.ClearChoice();
         Instance.followupLines = lines;
         Instance.followupIndex = 0;
         Instance.Show(lines[0]);
@@ -119,7 +126,32 @@ public class PetDialogue : MonoBehaviour
         Instance.sequence = null;
         Instance.clickUrl = null;
         Instance.followupLines = null;
+        Instance.ClearChoice();
         Instance.Show(text);
+    }
+
+    public static void Ask(string question, Action yes, Action no)
+    {
+        if (Instance == null)
+            return;
+
+        Instance.playingIntro = false;
+        Instance.sequence = null;
+        Instance.clickUrl = null;
+        Instance.followupLines = null;
+        Instance.onChoiceYes = yes;
+        Instance.onChoiceNo = no;
+        Instance.choiceOpen = true;
+        Instance.Show(question);
+        Instance.SetChoicesVisible(true);
+    }
+
+    public static void HideIf(string text)
+    {
+        if (Instance == null || !Instance.visible || Instance.currentLine != text)
+            return;
+
+        Instance.Hide();
     }
 
     public static void SayLink(string text, string url)
@@ -131,6 +163,7 @@ public class PetDialogue : MonoBehaviour
         Instance.sequence = null;
         Instance.clickUrl = url;
         Instance.followupLines = null;
+        Instance.ClearChoice();
         Instance.Show(text);
     }
 
@@ -145,7 +178,11 @@ public class PetDialogue : MonoBehaviour
 
     public static bool Blocks(Vector2 screenPoint)
     {
-        return Instance != null && Instance.visible && Instance.HitsBubble(screenPoint);
+        if (Instance == null || !Instance.visible)
+            return false;
+        if (Instance.choiceOpen && Instance.ChoiceAt(screenPoint) != 0)
+            return true;
+        return Instance.HitsBubble(screenPoint);
     }
 
     void Awake()
@@ -191,9 +228,138 @@ public class PetDialogue : MonoBehaviour
             Instance = null;
     }
 
+    bool resumeAfterName;
+
     void Start()
     {
+        LoadProgress();
+        bool continued = PetJourney.SavesProgress
+            && PetJourney.Instance != null
+            && PetJourney.Instance.CompletedTrips >= 1;
+        if (PetJourney.SavesProgress && HasPlayerName)
+        {
+            StartCoroutine(ResumeSaved());
+            return;
+        }
+
+        if (continued)
+        {
+            resumeAfterName = true;
+            StartCoroutine(ResumeSaved());
+            ShowNamePrompt();
+            return;
+        }
+
         StartCoroutine(AppearInCenter());
+    }
+
+    void OnApplicationQuit()
+    {
+        SaveProgress();
+    }
+
+    void LoadProgress()
+    {
+        if (!PetJourney.SavesProgress)
+            return;
+
+        string savedName = PlayerPrefs.GetString("PetDialogue.PlayerName", string.Empty);
+        PlayerName = string.IsNullOrEmpty(savedName) ? null : savedName;
+        int beat = PlayerPrefs.GetInt("PetDialogue.OpeningBeat", (int)OpeningBeat.None);
+        if (beat < 0 || beat > (int)OpeningBeat.TeachClick)
+            beat = (int)OpeningBeat.None;
+        openingBeat = (OpeningBeat)beat;
+        PetStory.LoadSaved();
+    }
+
+    void SaveProgress()
+    {
+        if (!PetJourney.SavesProgress)
+            return;
+
+        if (HasPlayerName)
+            PlayerPrefs.SetString("PetDialogue.PlayerName", PlayerName);
+        PlayerPrefs.SetInt("PetDialogue.OpeningBeat", (int)openingBeat);
+        PlayerPrefs.Save();
+    }
+
+    void SetOpening(OpeningBeat beat)
+    {
+        openingBeat = beat;
+        SaveProgress();
+    }
+
+    public static void ClearSession()
+    {
+        PlayerName = null;
+        if (Instance != null)
+            Instance.openingBeat = OpeningBeat.None;
+    }
+
+    IEnumerator ResumeSaved()
+    {
+        if (petRoot != null)
+        {
+            petRoot.localPosition = Vector3.zero;
+            petRoot.localRotation = Quaternion.identity;
+        }
+
+        bool atCorner = openingBeat != OpeningBeat.Greet && openingBeat != OpeningBeat.AskName;
+        transform.localPosition = atCorner ? new Vector3(6.6f, -3f, 0f) : Vector3.zero;
+        transform.localRotation = Quaternion.identity;
+        transform.localScale = new Vector3(0.5f, 0.5f, 0.5f);
+        if (speaker != null)
+            speaker.enabled = !PetJourney.PetIsAway;
+
+        var animator = GetComponent<Animator>();
+        if (animator != null && animator.runtimeAnimatorController != null)
+        {
+            animator.Play("Idle", 0, 0f);
+            animator.Update(0f);
+        }
+
+        transform.localPosition = atCorner ? new Vector3(6.6f, -3f, 0f) : Vector3.zero;
+
+        if (!PetJourney.PetIsAway && (openingBeat == OpeningBeat.None || openingBeat == OpeningBeat.TeachSend || openingBeat == OpeningBeat.TeachClick))
+            PetJourney.ShowJourneyButton();
+
+        bool continueFirstReturn = false;
+        if (PetJourney.Instance != null && PetJourney.Instance.CompletedTrips >= 1)
+        {
+            PetPhone.ShowButton();
+            if (PetJourney.PetIsAway && PetPhone.Instance != null)
+                PetPhone.Instance.SetAway(true);
+            PetCampaign campaign = PetCampaign.Ensure();
+            if (campaign.HasIntroduced)
+                PetJourney.Instance.ShowCollections();
+            else if (!PetJourney.PetIsAway && openingBeat == OpeningBeat.None && HasPlayerName)
+                continueFirstReturn = true;
+        }
+
+        if (!HasPlayerName)
+            yield break;
+
+        if (openingBeat == OpeningBeat.AskName)
+            SetOpening(OpeningBeat.Greet);
+
+        switch (openingBeat)
+        {
+            case OpeningBeat.Greet:
+                Show("Hello, " + PlayerName + ".");
+                break;
+            case OpeningBeat.Stay:
+                Show("I think I'll just stay here.");
+                break;
+            case OpeningBeat.TeachSend:
+            case OpeningBeat.TeachClick:
+                Show(TeachSendLine());
+                break;
+        }
+
+        if (continueFirstReturn)
+            PetCampaign.Ensure().BeginAfterFirstReturn();
+
+        yield break;
     }
 
     void LateUpdate()
@@ -223,20 +389,32 @@ public class PetDialogue : MonoBehaviour
         if (Input.GetMouseButtonDown(0))
         {
             pressScreen = PointerScreen();
-            pressedBubble = HitsBubble(pressScreen);
+            pressedChoice = ChoiceAt(pressScreen);
+            pressedBubble = pressedChoice == 0 && HitsBubble(pressScreen);
         }
 
         if (!Input.GetMouseButtonUp(0))
             return;
 
         Vector2 releaseScreen = PointerScreen();
+        int releasedChoice = ChoiceAt(releaseScreen);
+        int heldChoice = pressedChoice;
         bool wasBubble = pressedBubble || HitsBubble(releaseScreen);
         pressedBubble = false;
-        if (!wasBubble)
-            return;
+        pressedChoice = 0;
 
         float slop = Mathf.Max(1f, clickSlopPixels);
         if ((releaseScreen - pressScreen).sqrMagnitude > slop * slop)
+            return;
+
+        if (choiceOpen)
+        {
+            if (heldChoice != 0 && heldChoice == releasedChoice)
+                PickChoice(heldChoice);
+            return;
+        }
+
+        if (!wasBubble)
             return;
 
         AdvanceIntroOrHide();
@@ -278,7 +456,7 @@ public class PetDialogue : MonoBehaviour
     {
         if (openingBeat == OpeningBeat.AskName)
         {
-            openingBeat = OpeningBeat.None;
+            SetOpening(OpeningBeat.None);
             Hide();
             ShowNamePrompt();
             return;
@@ -286,7 +464,7 @@ public class PetDialogue : MonoBehaviour
 
         if (openingBeat == OpeningBeat.Greet)
         {
-            openingBeat = OpeningBeat.None;
+            SetOpening(OpeningBeat.Stay);
             Hide();
             StartCoroutine(MoveToCorner());
             return;
@@ -294,23 +472,15 @@ public class PetDialogue : MonoBehaviour
 
         if (openingBeat == OpeningBeat.Stay)
         {
-            openingBeat = OpeningBeat.None;
+            SetOpening(OpeningBeat.TeachSend);
             Hide();
             StartCoroutine(ShowJourneyIntroAfterDelay());
             return;
         }
 
-        if (openingBeat == OpeningBeat.TeachSend)
+        if (openingBeat == OpeningBeat.TeachSend || openingBeat == OpeningBeat.TeachClick)
         {
-            openingBeat = OpeningBeat.TeachClick;
-            PetJourney.ShowJourneyButton();
-            Show("See the Journey button on the right? Click it, and I'll head out on a trip.");
-            return;
-        }
-
-        if (openingBeat == OpeningBeat.TeachClick)
-        {
-            openingBeat = OpeningBeat.None;
+            SetOpening(OpeningBeat.None);
             Hide();
             return;
         }
@@ -381,9 +551,12 @@ public class PetDialogue : MonoBehaviour
         for (int i = 0; i < canvases.Length; i++)
         {
             Canvas canvas = canvases[i];
-            if (canvas == null || !canvas.isRootCanvas)
+            if (canvas == null || !canvas.isRootCanvas || !canvas.gameObject.activeInHierarchy)
                 continue;
             if (canvas.renderMode != RenderMode.ScreenSpaceOverlay)
+                continue;
+            // 调试控制台也是 Overlay（sortingOrder 32000），关闭时会失活，手机不能挂在它下面。
+            if (canvas.sortingOrder >= 32000 || canvas.gameObject.name == "DebugConsoleWindow")
                 continue;
             return canvas;
         }
@@ -510,7 +683,18 @@ public class PetDialogue : MonoBehaviour
         if (speaker != null && !PetJourney.PetIsAway)
             speaker.enabled = true;
 
-        openingBeat = OpeningBeat.Greet;
+        bool continued = openingBeat == OpeningBeat.None
+            && PetJourney.Instance != null
+            && PetJourney.Instance.CompletedTrips >= 1;
+        if (continued)
+        {
+            PetCampaign campaign = PetCampaign.Ensure();
+            if (!campaign.HasIntroduced && !PetJourney.PetIsAway)
+                campaign.BeginAfterFirstReturn();
+            yield break;
+        }
+
+        SetOpening(OpeningBeat.Greet);
         Show("Hello, " + PlayerName + ".");
     }
 
@@ -800,6 +984,9 @@ public class PetDialogue : MonoBehaviour
             return;
 
         PlayerName = name;
+        bool continued = resumeAfterName;
+        resumeAfterName = false;
+        SetOpening(continued ? OpeningBeat.None : OpeningBeat.Greet);
 
         if (namePromptMoveRoutine != null)
         {
@@ -879,14 +1066,14 @@ public class PetDialogue : MonoBehaviour
         transform.localScale = new Vector3(0.5f, 0.5f, 0.5f);
         if (speaker != null)
             speaker.enabled = true;
-        openingBeat = OpeningBeat.AskName;
+        SetOpening(OpeningBeat.AskName);
         Show("Hi, I'm Blinky, your companion pet. What should I call you?");
     }
 
     IEnumerator MoveToCorner()
     {
         yield return StartCoroutine(PlayClipAndWait("Enter"));
-        openingBeat = OpeningBeat.Stay;
+        SetOpening(OpeningBeat.Stay);
         Show("I think I'll just stay here.");
     }
 
@@ -964,7 +1151,7 @@ public class PetDialogue : MonoBehaviour
 
     public void CloseForJourney()
     {
-        openingBeat = OpeningBeat.None;
+        SetOpening(OpeningBeat.None);
         if (visible)
             Hide();
     }
@@ -972,9 +1159,15 @@ public class PetDialogue : MonoBehaviour
     IEnumerator ShowJourneyIntroAfterDelay()
     {
         yield return new WaitForSecondsRealtime(Mathf.Max(0f, journeyIntroDelay));
-        openingBeat = OpeningBeat.TeachSend;
+        SetOpening(OpeningBeat.TeachSend);
+        PetJourney.ShowJourneyButton();
+        Show(TeachSendLine());
+    }
+
+    static string TeachSendLine()
+    {
         string name = string.IsNullOrWhiteSpace(PlayerName) ? "there" : PlayerName;
-        Show("Alright, " + name + ". It's time I showed you how to send me out to search for memes.");
+        return "Alright, " + name + ". It's time I showed you how to send me out to search for memes. Click me. See the first button on my right? Click it, and I'll head out to look for memes.";
     }
 
     void HoldIdle()
@@ -1041,6 +1234,8 @@ public class PetDialogue : MonoBehaviour
         if (emphasis)
             dialogueText.fontSize = 32;
         dialogueText.text = PetStory.ApplyName(content);
+        if (!choiceOpen)
+            SetChoicesVisible(false);
         if (headBubble != null)
             headBubble.gameObject.SetActive(true);
         else
@@ -1053,9 +1248,11 @@ public class PetDialogue : MonoBehaviour
         bool wasVisible = visible;
         visible = false;
         pressedBubble = false;
+        pressedChoice = 0;
         clickUrl = null;
         followupLines = null;
         emphasis = false;
+        ClearChoice();
         if (PetPhone.Instance != null)
             PetPhone.Instance.HideSpeech();
         if (headBubble != null)
@@ -1172,6 +1369,83 @@ public class PetDialogue : MonoBehaviour
     {
         Font font = Resources.Load<Font>(resourcePath);
         return font != null ? font : defaultFont;
+    }
+
+    void ClearChoice()
+    {
+        choiceOpen = false;
+        onChoiceYes = null;
+        onChoiceNo = null;
+        SetChoicesVisible(false);
+    }
+
+    void SetChoicesVisible(bool show)
+    {
+        BindChoices();
+        if (choiceYes != null)
+            choiceYes.gameObject.SetActive(show);
+        if (choiceNo != null)
+            choiceNo.gameObject.SetActive(show);
+    }
+
+    void BindChoices()
+    {
+        if (choiceYes != null && choiceNo != null)
+            return;
+
+        Button[] buttons = FindObjectsOfType<Button>(true);
+        for (int i = 0; i < buttons.Length; i++)
+        {
+            if (buttons[i] == null)
+                continue;
+            if (buttons[i].gameObject.name == "ChoiceYes")
+                choiceYes = buttons[i];
+            else if (buttons[i].gameObject.name == "ChoiceNo")
+                choiceNo = buttons[i];
+        }
+    }
+
+    void PickChoice(int which)
+    {
+        Action yes = onChoiceYes;
+        Action no = onChoiceNo;
+        ClearChoice();
+        if (which == 1)
+        {
+            if (yes != null)
+                yes();
+        }
+        else if (no != null)
+            no();
+    }
+
+    int ChoiceAt(Vector2 screenPoint)
+    {
+        if (!choiceOpen)
+            return 0;
+        if (HitsChoice(choiceYes, screenPoint))
+            return 1;
+        if (HitsChoice(choiceNo, screenPoint))
+            return 2;
+        return 0;
+    }
+
+    bool HitsChoice(Button button, Vector2 screenPoint)
+    {
+        if (button == null || !button.gameObject.activeInHierarchy)
+            return false;
+
+        RectTransform rect = button.transform as RectTransform;
+        if (rect == null)
+            return false;
+
+        Camera eventCamera = cam;
+        Canvas canvas = button.GetComponentInParent<Canvas>();
+        if (canvas != null && canvas.renderMode == RenderMode.ScreenSpaceOverlay)
+            eventCamera = null;
+        else if (canvas != null && canvas.worldCamera != null)
+            eventCamera = canvas.worldCamera;
+        return RectTransformUtility.RectangleContainsScreenPoint(rect, screenPoint, eventCamera);
     }
 
     bool HitsBubble(Vector2 screenPoint)

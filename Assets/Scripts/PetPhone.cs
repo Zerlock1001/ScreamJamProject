@@ -56,7 +56,9 @@ public class PetPhone : MonoBehaviour
 
         var root = new GameObject("PhoneHost", typeof(RectTransform));
         root.transform.SetParent(canvas.transform, false);
-        return root.AddComponent<PetPhone>();
+        var phone = root.AddComponent<PetPhone>();
+        phone.ActivateHost();
+        return phone;
     }
 
     void Awake()
@@ -83,6 +85,7 @@ public class PetPhone : MonoBehaviour
         if (Instance == null)
             return;
 
+        Instance.ActivateHost();
         Instance.BindLauncher();
         if (Instance.launcher != null)
             Instance.launcher.gameObject.SetActive(true);
@@ -93,8 +96,72 @@ public class PetPhone : MonoBehaviour
         SetOpen(!IsOpen);
     }
 
+    // 协程挂在 PhoneHost 上。这里只保证宿主在游戏 Overlay 画布下并且是激活的，不打开聊天面板。
+    void ActivateHost()
+    {
+        if (!IsOnGameOverlay())
+        {
+            Canvas canvas = PetDialogue.OverlayCanvas();
+            if (canvas != null && canvas.transform != transform)
+                transform.SetParent(canvas.transform, false);
+        }
+
+        if (!gameObject.activeInHierarchy)
+        {
+            Transform node = transform.parent;
+            while (node != null && !gameObject.activeInHierarchy)
+            {
+                if (IsDebugCanvasObject(node.gameObject))
+                    break;
+                if (node.GetComponent<Canvas>() != null && !node.gameObject.activeSelf)
+                    node.gameObject.SetActive(true);
+                node = node.parent;
+            }
+        }
+
+        if (!gameObject.activeSelf)
+            gameObject.SetActive(true);
+
+        if (!enabled)
+            enabled = true;
+    }
+
+    bool IsOnGameOverlay()
+    {
+        Transform node = transform.parent;
+        while (node != null)
+        {
+            var canvas = node.GetComponent<Canvas>();
+            if (canvas != null)
+            {
+                if (!canvas.gameObject.activeInHierarchy)
+                    return false;
+                if (canvas.renderMode != RenderMode.ScreenSpaceOverlay)
+                    return false;
+                if (IsDebugCanvasObject(canvas.gameObject))
+                    return false;
+                return true;
+            }
+
+            node = node.parent;
+        }
+
+        return false;
+    }
+
+    static bool IsDebugCanvasObject(GameObject go)
+    {
+        if (go == null)
+            return false;
+        if (go.name == "DebugConsoleWindow" || go.name == "[DebugConsole]")
+            return true;
+        var canvas = go.GetComponent<Canvas>();
+        return canvas != null && canvas.sortingOrder >= 32000;
+    }
+
     public void SetOpen(bool open)
     {
+        ActivateHost();
         if (visual == null || open == phoneOpen)
             return;
 
@@ -109,6 +176,11 @@ public class PetPhone : MonoBehaviour
         if (phoneOpen)
         {
             visual.SetActive(true);
+            if (phoneGroup != null)
+            {
+                phoneGroup.interactable = true;
+                phoneGroup.blocksRaycasts = true;
+            }
             phoneAnimRoutine = StartCoroutine(AnimatePhoneOpen());
             StartCoroutine(ScrollToBottom());
         }
@@ -203,6 +275,7 @@ public class PetPhone : MonoBehaviour
 
     public void BeginNameEntry(Action<string> onSubmit)
     {
+        ActivateHost();
         nameSubmitted = onSubmit;
         AddMessage("Please enter your username");
         if (speechText != null)
@@ -250,6 +323,7 @@ public class PetPhone : MonoBehaviour
 
     public void AddMessage(string text)
     {
+        ActivateHost();
         if (chatContent == null || string.IsNullOrEmpty(text))
             return;
 
@@ -302,6 +376,7 @@ public class PetPhone : MonoBehaviour
 
     public void AddPostcard(Sprite picture, string caption)
     {
+        ActivateHost();
         if (chatContent == null)
             return;
 
@@ -596,27 +671,43 @@ public class PetPhone : MonoBehaviour
         chatScroll.viewport = viewport;
         chatScroll.content = chatContent;
 
-        var galleryBar = new GameObject("GalleryBar", typeof(RectTransform), typeof(LayoutElement));
-        galleryBar.transform.SetParent(screen, false);
-        galleryBar.GetComponent<LayoutElement>().preferredHeight = 44f;
-        var galleryObject = new GameObject("GalleryButton", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
-        galleryObject.transform.SetParent(galleryBar.transform, false);
-        var galleryRect = galleryObject.GetComponent<RectTransform>();
-        galleryRect.anchorMin = new Vector2(1f, 0.5f);
-        galleryRect.anchorMax = new Vector2(1f, 0.5f);
-        galleryRect.pivot = new Vector2(1f, 0.5f);
-        galleryRect.anchoredPosition = Vector2.zero;
-        galleryRect.sizeDelta = new Vector2(44f, 44f);
-        var galleryImage = galleryObject.GetComponent<Image>();
-        galleryImage.sprite = Skin();
-        galleryImage.type = Image.Type.Simple;
-        galleryImage.color = new Color(0.22f, 0.22f, 0.24f, 1f);
-        var galleryButton = galleryObject.GetComponent<Button>();
-        galleryButton.targetGraphic = galleryImage;
-        galleryButton.interactable = false;
-        var galleryLabel = CreateText("Icon", galleryObject.transform, "▦", 18, TextAnchor.MiddleCenter, Color.white);
-        Stretch(galleryLabel.rectTransform, 0f);
-        galleryLabel.raycastTarget = false;
+        var divider = new GameObject("Divider", typeof(RectTransform), typeof(LayoutElement));
+        divider.transform.SetParent(screen, false);
+        divider.GetComponent<LayoutElement>().preferredHeight = 48f;
+
+        var line = CreatePanel("Line", divider.transform, Skin(), new Color(0.78f, 0.78f, 0.82f, 1f));
+        line.anchorMin = new Vector2(0f, 0.5f);
+        line.anchorMax = new Vector2(1f, 0.5f);
+        line.offsetMin = new Vector2(48f, -0.5f);
+        line.offsetMax = new Vector2(0f, 0.5f);
+        line.GetComponent<Image>().raycastTarget = false;
+
+        var pictureObject = new GameObject("CollectionsButton", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
+        pictureObject.transform.SetParent(divider.transform, false);
+        var pictureRect = pictureObject.GetComponent<RectTransform>();
+        pictureRect.anchorMin = new Vector2(0f, 0.5f);
+        pictureRect.anchorMax = new Vector2(0f, 0.5f);
+        pictureRect.pivot = new Vector2(0f, 0.5f);
+        pictureRect.anchoredPosition = Vector2.zero;
+        pictureRect.sizeDelta = new Vector2(40f, 40f);
+        var pictureImage = pictureObject.GetComponent<Image>();
+        pictureImage.sprite = Skin();
+        pictureImage.type = Image.Type.Simple;
+        pictureImage.color = new Color(0.22f, 0.22f, 0.24f, 1f);
+        var pictureButton = pictureObject.GetComponent<Button>();
+        pictureButton.targetGraphic = pictureImage;
+        pictureButton.onClick.AddListener(() =>
+        {
+            if (PetJourney.Instance != null)
+                PetJourney.Instance.OpenGallery();
+        });
+        var iconObject = new GameObject("Icon", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        iconObject.transform.SetParent(pictureObject.transform, false);
+        var icon = iconObject.GetComponent<Image>();
+        icon.sprite = PictureIcon();
+        icon.preserveAspect = true;
+        icon.raycastTarget = false;
+        Stretch(icon.rectTransform, 7f);
 
         CreateCloseButton(shell, () => SetOpen(false));
         shell.gameObject.AddComponent<WindowDrag>().Target = root;
@@ -660,6 +751,51 @@ public class PetPhone : MonoBehaviour
     }
 
     static Sprite skinSprite;
+    static Sprite pictureIcon;
+
+    static Sprite PictureIcon()
+    {
+        if (pictureIcon != null)
+            return pictureIcon;
+
+        const int size = 32;
+        var texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        texture.filterMode = FilterMode.Point;
+        var pixels = new Color[size * size];
+        var clear = new Color(0f, 0f, 0f, 0f);
+        var frame = new Color(0.95f, 0.95f, 0.97f, 1f);
+        var sky = new Color(0.62f, 0.78f, 0.84f, 1f);
+        var sun = new Color(0.96f, 0.84f, 0.46f, 1f);
+        var hill = new Color(0.46f, 0.66f, 0.5f, 1f);
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                bool border = x < 2 || y < 2 || x >= size - 2 || y >= size - 2;
+                bool inner = x >= 5 && x < size - 5 && y >= 5 && y < size - 5;
+                Color pixel = clear;
+                if (border)
+                    pixel = frame;
+                else if (inner)
+                {
+                    int dx = x - 22;
+                    int dy = y - 22;
+                    bool sunDot = dx * dx + dy * dy <= 9;
+                    int hillTop = 8 + (x < 16 ? (16 - x) / 2 : (x - 16) / 3);
+                    pixel = sunDot ? sun : (y <= hillTop ? hill : sky);
+                }
+
+                pixels[y * size + x] = pixel;
+            }
+        }
+
+        texture.SetPixels(pixels);
+        texture.Apply();
+        texture.hideFlags = HideFlags.HideAndDontSave;
+        pictureIcon = Sprite.Create(texture, new Rect(0f, 0f, size, size), new Vector2(0.5f, 0.5f), 100f);
+        pictureIcon.hideFlags = HideFlags.HideAndDontSave;
+        return pictureIcon;
+    }
 
     static Sprite Skin()
     {

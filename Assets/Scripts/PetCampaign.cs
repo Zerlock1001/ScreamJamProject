@@ -22,7 +22,8 @@ public class PetCampaign : MonoBehaviour
         Hunger,
         Link,
         Phase,
-        OfferFlag
+        OfferFlag,
+        Choice
     }
 
     struct Step
@@ -34,6 +35,11 @@ public class PetCampaign : MonoBehaviour
         public static Step Say(params string[] lines)
         {
             return new Step { kind = Kind.Lines, lines = lines };
+        }
+
+        public static Step Choose()
+        {
+            return new Step { kind = Kind.Choice };
         }
 
         public static Step Big(string line)
@@ -54,11 +60,13 @@ public class PetCampaign : MonoBehaviour
 
     public static PetCampaign Instance { get; private set; }
     public static bool BlocksJourney => Instance != null && (Instance.busy || Instance.dead || Instance.hungerLooping || Instance.choiceOpen);
+    public bool HasIntroduced => introduced;
 
     bool busy;
     bool dead;
     bool hungerLooping;
     bool choiceOpen;
+    bool firstReturnScript;
     bool listening;
     bool pending;
     bool introduced;
@@ -117,7 +125,9 @@ public class PetCampaign : MonoBehaviour
             return Instance;
 
         var host = new GameObject("PetCampaign");
-        return host.AddComponent<PetCampaign>();
+        PetCampaign created = host.AddComponent<PetCampaign>();
+        created.LoadProgress();
+        return created;
     }
 
     void Awake()
@@ -129,7 +139,48 @@ public class PetCampaign : MonoBehaviour
         }
 
         Instance = this;
+        LoadProgress();
         DebugConsole.RegisterCommand("offer", "/offer", "After the tenth return, choose to join or refuse.", _ => Offer());
+    }
+
+    bool progressLoaded;
+
+    void LoadProgress()
+    {
+        if (progressLoaded || !PetJourney.SavesProgress)
+            return;
+
+        progressLoaded = true;
+        introduced = PlayerPrefs.GetInt("PetCampaign.Introduced", 0) != 0;
+        offerUnlocked = PlayerPrefs.GetInt("PetCampaign.OfferUnlocked", 0) != 0;
+        int trips = PetJourney.Instance != null ? PetJourney.Instance.CompletedTrips : 0;
+        if (trips >= 2)
+            introduced = true;
+        if (!offerUnlocked && trips >= 10 && PetJourney.Instance != null && !PetJourney.PetIsAway)
+            offerUnlocked = true;
+        if (!PlayerPrefs.HasKey("PetStory.Phase") && trips > 0)
+        {
+            PetStory.Phase phase = PetStory.Phase.Normal;
+            if (trips >= 8)
+                phase = PetStory.Phase.StateIII;
+            else if (trips >= 6)
+                phase = PetStory.Phase.StateII;
+            else if (trips >= 4)
+                phase = PetStory.Phase.StateI;
+            PetStory.SetPhase(phase);
+        }
+
+        SaveFlags();
+    }
+
+    void SaveFlags()
+    {
+        if (!PetJourney.SavesProgress)
+            return;
+
+        PlayerPrefs.SetInt("PetCampaign.Introduced", introduced ? 1 : 0);
+        PlayerPrefs.SetInt("PetCampaign.OfferUnlocked", offerUnlocked ? 1 : 0);
+        PlayerPrefs.Save();
     }
 
     void OnEnable()
@@ -200,6 +251,7 @@ public class PetCampaign : MonoBehaviour
         else if (completed >= 4)
             phase = PetStory.Phase.StateI;
         PetStory.SetPhase(phase);
+        SaveFlags();
     }
 
     public void BeginAfterFirstReturn()
@@ -207,20 +259,29 @@ public class PetCampaign : MonoBehaviour
         if (introduced)
             return;
 
-        introduced = true;
-        if (PetJourney.Instance != null)
-            PetJourney.Instance.ShowCollections();
-
+        firstReturnScript = true;
         homeSteps = new[]
         {
-            Step.Say("Collections is on the screen now. The pictures I keep end up there."),
-            Step.Say("If I starve, a Feed button appears. Two bites. Remember that."),
-            Step.Say("Poke my face while I'm home and I'll play. There is no button for that."),
-            Step.Say("The bar on the right has to fill before I can leave again."),
-            Step.Say("When it's full, send me out.")
+            Step.Choose(),
+            Step.Say("That trip wore me out. Let me rest before I can head out again. See the picture button on the left of your phone? Open it, and you can see every meme I found. If this rest feels too slow, the bar beside me has to fill before I can leave again.")
         };
         index = 0;
         Play();
+    }
+
+    void AskFirstReturn()
+    {
+        string name = PetDialogue.HasPlayerName ? PetDialogue.PlayerName : "there";
+        PetDialogue.Ask(
+            name + ", I'm back! Do you still like the memes I found for you?",
+            () => AnswerFirstReturn("Heh, good."),
+            () => AnswerFirstReturn("Don't delete me yet! Next time I'll find memes you actually like!"));
+    }
+
+    void AnswerFirstReturn(string line)
+    {
+        listening = true;
+        PetDialogue.SayLines(line);
     }
 
     public void OnTripStarted(int trip, float duration)
@@ -235,6 +296,7 @@ public class PetCampaign : MonoBehaviour
         tripLines = null;
         sent = 0;
         retract = false;
+        firstReturnScript = false;
         if (trip <= 1 || PetStory.Current == PetStory.Phase.Refused)
             return;
 
@@ -338,8 +400,17 @@ public class PetCampaign : MonoBehaviour
         listening = false;
         if (homeSteps == null || index >= homeSteps.Length)
         {
+            bool nag = firstReturnScript;
+            firstReturnScript = false;
             busy = false;
             homeSteps = null;
+            if (nag)
+            {
+                introduced = true;
+                SaveFlags();
+                if (PetJourney.Instance != null)
+                    PetJourney.Instance.BeginRestNag();
+            }
             return;
         }
 
@@ -353,11 +424,15 @@ public class PetCampaign : MonoBehaviour
                 return;
             case Kind.OfferFlag:
                 offerUnlocked = true;
+                SaveFlags();
                 FinishStep();
                 return;
             case Kind.Lines:
                 listening = true;
                 PetDialogue.SayLines(step.lines);
+                return;
+            case Kind.Choice:
+                AskFirstReturn();
                 return;
             case Kind.Emphasis:
                 listening = true;

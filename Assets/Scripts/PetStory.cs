@@ -23,6 +23,22 @@ public class PetStory : MonoBehaviour
     public static void SetPhase(Phase phase)
     {
         Current = phase;
+        if (!PetJourney.SavesProgress)
+            return;
+
+        PlayerPrefs.SetInt("PetStory.Phase", (int)phase);
+        PlayerPrefs.Save();
+    }
+
+    public static void LoadSaved()
+    {
+        if (!PetJourney.SavesProgress)
+            return;
+
+        int saved = PlayerPrefs.GetInt("PetStory.Phase", (int)Phase.Normal);
+        if (saved < (int)Phase.Normal || saved > (int)Phase.Refused)
+            saved = (int)Phase.Normal;
+        Current = (Phase)saved;
     }
 
     public static string ApplyName(string line)
@@ -69,6 +85,7 @@ public class PetStory : MonoBehaviour
         }
 
         Instance = this;
+        LoadSaved();
         DebugConsole.RegisterCommand("status", "/status", "Print the current story state and how it changes.", _ => PrintStatus());
     }
 

@@ -113,6 +113,9 @@ namespace ScreamJam.Debugging
             RegisterCommand("ip", "/ip", "Show the player's approximate city.", _ => BeginIpLookup());
             RegisterCommand("sayip", "/sayip", "Ask whether the player lives in their IP city.", _ => BeginSayIp());
             RegisterCommand("quit", "/quit", "Quit the game.", _ => QuitGame());
+            _open = false;
+            if (_uguiRoot != null)
+                _uguiRoot.SetActive(false);
         }
 
         private void OnDestroy()
@@ -152,7 +155,7 @@ namespace ScreamJam.Debugging
             // OnGUI also checks this key, because a focused text field can
             // swallow the event in some situations. ToggleConsole de-dupes
             // the two paths so one key press always means one toggle.
-            if (Input.GetKeyDown(KeyCode.BackQuote))
+            if (Time.frameCount > 2 && Input.GetKeyDown(KeyCode.BackQuote))
                 ToggleConsole();
 
             if (_open)
@@ -209,6 +212,16 @@ namespace ScreamJam.Debugging
                 _autoScroll = false;
                 _scroll.y = 0f;
             }
+        }
+
+        public static void CloseImmediate()
+        {
+            if (_instance == null)
+                return;
+
+            _instance._open = false;
+            if (_instance._uguiRoot != null)
+                _instance._uguiRoot.SetActive(false);
         }
 
         private void SetOpen(bool open)
@@ -310,7 +323,8 @@ namespace ScreamJam.Debugging
                 return;
 
             // Catch `~` before the command text field can consume it.
-            if (Event.current.type == EventType.KeyDown &&
+            if (Time.frameCount > 2 &&
+                Event.current.type == EventType.KeyDown &&
                 Event.current.keyCode == KeyCode.BackQuote)
             {
                 ToggleConsole();

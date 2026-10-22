@@ -94,7 +94,9 @@ namespace ScreamJam.Debugging
             panelRect.sizeDelta = new Vector2(900f, 620f);
 
             var panelImage = panelObject.GetComponent<Image>();
-            panelImage.color = new Color(0.04f, 0.04f, 0.06f, 0.97f);
+            panelImage.sprite = WhiteSprite();
+            panelImage.type = Image.Type.Simple;
+            panelImage.color = new Color(0.1f, 0.1f, 0.12f, 0.97f);
             panelImage.raycastTarget = true;
 
             GameObject headerObject = CreateUiObject(
@@ -109,7 +111,11 @@ namespace ScreamJam.Debugging
             headerRect.pivot = new Vector2(0.5f, 1f);
             headerRect.anchoredPosition = Vector2.zero;
             headerRect.sizeDelta = new Vector2(0f, 36f);
-            headerObject.GetComponent<Image>().color = new Color(0.12f, 0.12f, 0.16f, 1f);
+            var headerImage = headerObject.GetComponent<Image>();
+            headerImage.sprite = WhiteSprite();
+            headerImage.type = Image.Type.Simple;
+            headerImage.color = new Color(0.16f, 0.16f, 0.2f, 1f);
+            headerImage.raycastTarget = true;
 
             Text title = CreateText(
                 "Title",
@@ -166,7 +172,10 @@ namespace ScreamJam.Debugging
             viewportRect.offsetMin = Vector2.zero;
             viewportRect.offsetMax = Vector2.zero;
             var viewportImage = viewportObject.GetComponent<Image>();
-            viewportImage.color = new Color(0f, 0f, 0f, 0.01f);
+            viewportImage.sprite = WhiteSprite();
+            viewportImage.type = Image.Type.Simple;
+            viewportImage.color = new Color(0.1f, 0.1f, 0.12f, 0.01f);
+            viewportImage.raycastTarget = true;
             viewportObject.GetComponent<Mask>().showMaskGraphic = false;
 
             GameObject contentObject = CreateUiObject(
@@ -286,7 +295,10 @@ namespace ScreamJam.Debugging
             inputRect.offsetMax = new Vector2(-198f, -4f);
 
             var background = inputObject.GetComponent<Image>();
+            background.sprite = WhiteSprite();
+            background.type = Image.Type.Simple;
             background.color = new Color(0.97f, 0.97f, 0.98f, 1f);
+            background.raycastTarget = true;
 
             Text text = CreateText(
                 "Text",
@@ -472,6 +484,8 @@ namespace ScreamJam.Debugging
                 typeof(Button));
 
             var background = buttonObject.GetComponent<Image>();
+            background.sprite = WhiteSprite();
+            background.type = Image.Type.Simple;
             background.color = new Color(0.2f, 0.22f, 0.28f, 1f);
             background.raycastTarget = true;
 
@@ -490,6 +504,25 @@ namespace ScreamJam.Debugging
             Stretch(text.rectTransform);
 
             return button;
+        }
+
+        static Sprite whiteSprite;
+
+        static Sprite WhiteSprite()
+        {
+            if (whiteSprite != null)
+                return whiteSprite;
+
+            var texture = new Texture2D(4, 4, TextureFormat.RGBA32, false);
+            var pixels = new Color[16];
+            for (int i = 0; i < pixels.Length; i++)
+                pixels[i] = Color.white;
+            texture.SetPixels(pixels);
+            texture.Apply();
+            texture.hideFlags = HideFlags.HideAndDontSave;
+            whiteSprite = Sprite.Create(texture, new Rect(0f, 0f, 4f, 4f), new Vector2(0.5f, 0.5f), 100f);
+            whiteSprite.hideFlags = HideFlags.HideAndDontSave;
+            return whiteSprite;
         }
 
         private static void Stretch(RectTransform rect)
