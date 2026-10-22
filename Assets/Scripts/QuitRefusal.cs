@@ -2,8 +2,8 @@ using UnityEngine;
 using UnityEngine.UI;
 
 /// <summary>
-/// Quit 不会关闭游戏，只会让角色说完一段不肯放人走的话。
-/// 远行途中在画面中下显示一行逐渐淡出的字。
+/// Quit 第一次只出对话。再点一次才退出。
+/// 远行途中第一次点击在画面中下显示一行逐渐淡出的字，再点一次同样退出。
 /// </summary>
 public class QuitRefusal : MonoBehaviour
 {
@@ -22,13 +22,14 @@ public class QuitRefusal : MonoBehaviour
     GameObject noteRoot;
     Text awayNote;
     float noteTime;
+    bool warned;
 
     void Awake()
     {
         instance = this;
         var button = GetComponent<Button>();
         if (button != null)
-            button.onClick.AddListener(Play);
+            button.onClick.AddListener(OnQuitClicked);
         CreateAwayNote();
     }
 
@@ -50,6 +51,18 @@ public class QuitRefusal : MonoBehaviour
             noteRoot.SetActive(false);
     }
 
+    void OnQuitClicked()
+    {
+        if (warned)
+        {
+            QuitNow();
+            return;
+        }
+
+        warned = true;
+        Play();
+    }
+
     public static void Play()
     {
         if (PetJourney.PetIsAway)
@@ -60,6 +73,15 @@ public class QuitRefusal : MonoBehaviour
         }
 
         PetDialogue.PlaySequence(Lines);
+    }
+
+    static void QuitNow()
+    {
+#if UNITY_EDITOR
+        UnityEditor.EditorApplication.isPlaying = false;
+#else
+        Application.Quit();
+#endif
     }
 
     void ShowAwayNote()
