@@ -110,6 +110,7 @@ namespace ScreamJam.Debugging
             RegisterCommand("screenshot", "/screenshot [show]", "Capture the full desktop, or show the last screenshot.", HandleScreenshot);
             RegisterCommand("record", "/record [play]", "Record 10s of microphone audio, or play the last recording.", HandleRecord);
             RegisterCommand("tempclear", "/tempclear", "Delete cached photos, screenshots, and recordings.", _ => ClearCachedFiles());
+            RegisterCommand("ip", "/ip", "Show the player's approximate city.", _ => BeginIpLookup());
             RegisterCommand("quit", "/quit", "Quit the game.", _ => QuitGame());
         }
 
