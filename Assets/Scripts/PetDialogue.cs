@@ -16,37 +16,50 @@ public class PetDialogue : MonoBehaviour
     [SerializeField] SpriteRenderer speaker;
     [SerializeField] bool playIntroOnStart = true;
     [SerializeField] string[] introLines = { "Hi, XX! I'm Blinky, your companion pets.", "Intro text 2" };
+    [SerializeField] string journeyIntroLine = "Press Journey when you want me to go out and bring something back.";
+    [SerializeField] float journeyIntroDelay = 3f;
     [SerializeField] float clickSlopPixels = 18f;
-    [SerializeField] int charactersPerLine = 10;
-    [SerializeField] Vector2 bubbleSize = new Vector2(5.4f, 2.15f);
-    [SerializeField] float gap = 0.22f;
+    [SerializeField] RectTransform dialogueBox;
+    [SerializeField] Text dialogueText;
 
-    static readonly string[] FontCandidates =
-    {
-        "Microsoft YaHei",
-        "微软雅黑",
-        "SimHei",
-        "黑体",
-        "SimSun",
-        "Arial"
-    };
+    static readonly Color StateIColor = new Color(0.36f, 0.20f, 0.18f, 1f);
+    static readonly Color StateIIColor = new Color(0.20f, 0.24f, 0.40f, 1f);
 
     Camera cam;
-    GameObject bubbleObject;
-    SpriteRenderer bubbleRenderer;
-    TextMesh bodyText;
-    MeshRenderer bodyRenderer;
+    Font defaultFont;
+    Color defaultColor;
+    bool styleCached;
 
     bool visible;
     bool pressedBubble;
     bool playingIntro;
     int introIndex;
+    enum OpeningBeat
+    {
+        None,
+        AskName,
+        Greet,
+        Stay,
+        TeachSend,
+        TeachClick
+    }
+
+    OpeningBeat openingBeat;
     string[] sequence;
     int sequenceIndex;
+    string[] followupLines;
+    int followupIndex;
     string clickUrl;
+    string currentLine;
+    Text sceneDialogueText;
+
+    public static Sprite PortraitSprite { get; private set; }
     Vector2 pressScreen;
     GameObject namePrompt;
     InputField nameInput;
+    Transform headBubble;
+    Vector3 headLocalOffset;
+    bool headPoseCached;
 
     public static string PlayerName { get; private set; }
     public static bool HasPlayerName => !string.IsNullOrEmpty(PlayerName);
@@ -58,7 +71,21 @@ public class PetDialogue : MonoBehaviour
             return;
 
         Instance.clickUrl = null;
+        Instance.followupLines = null;
         Instance.Show(text);
+    }
+
+    public static void SayLines(params string[] lines)
+    {
+        if (Instance == null || lines == null || lines.Length == 0)
+            return;
+
+        Instance.playingIntro = false;
+        Instance.sequence = null;
+        Instance.clickUrl = null;
+        Instance.followupLines = lines;
+        Instance.followupIndex = 0;
+        Instance.Show(lines[0]);
     }
 
     public static void SayOnce(string text)
@@ -69,6 +96,7 @@ public class PetDialogue : MonoBehaviour
         Instance.playingIntro = false;
         Instance.sequence = null;
         Instance.clickUrl = null;
+        Instance.followupLines = null;
         Instance.Show(text);
     }
 
@@ -80,6 +108,7 @@ public class PetDialogue : MonoBehaviour
         Instance.playingIntro = false;
         Instance.sequence = null;
         Instance.clickUrl = url;
+        Instance.followupLines = null;
         Instance.Show(text);
     }
 
@@ -102,11 +131,14 @@ public class PetDialogue : MonoBehaviour
         Instance = this;
         if (speaker == null)
             speaker = GetComponent<SpriteRenderer>();
+        if (speaker != null)
+            PortraitSprite = speaker.sprite;
         cam = Camera.main;
         if (speaker != null)
             speaker.enabled = false;
         HoldIdle();
-        CreateBubble();
+        PetPhone.Ensure();
+        BindDialogue();
         Hide();
     }
 
@@ -118,10 +150,23 @@ public class PetDialogue : MonoBehaviour
 
     void Start()
     {
-        if (speaker != null)
-            speaker.enabled = false;
-        HoldIdle();
-        ShowNamePrompt();
+        StartCoroutine(AppearInCenter());
+    }
+
+    void LateUpdate()
+    {
+        if (headBubble == null)
+            return;
+
+        if (!headPoseCached)
+        {
+            headLocalOffset = headBubble.localPosition;
+            headPoseCached = true;
+        }
+
+        Vector3 scale = transform.lossyScale;
+        headBubble.position = transform.position + Vector3.Scale(headLocalOffset, scale);
+        headBubble.rotation = Quaternion.identity;
     }
 
     void Update()
@@ -154,7 +199,10 @@ public class PetDialogue : MonoBehaviour
     void BeginIntro()
     {
         if (introLines == null || introLines.Length == 0)
+        {
+            StartCoroutine(ShowJourneyIntroAfterDelay());
             return;
+        }
 
         playingIntro = true;
         introIndex = 0;
@@ -182,6 +230,45 @@ public class PetDialogue : MonoBehaviour
 
     void AdvanceIntroOrHide()
     {
+        if (openingBeat == OpeningBeat.AskName)
+        {
+            openingBeat = OpeningBeat.None;
+            Hide();
+            ShowNamePrompt();
+            return;
+        }
+
+        if (openingBeat == OpeningBeat.Greet)
+        {
+            openingBeat = OpeningBeat.None;
+            Hide();
+            StartCoroutine(MoveToCorner());
+            return;
+        }
+
+        if (openingBeat == OpeningBeat.Stay)
+        {
+            openingBeat = OpeningBeat.None;
+            Hide();
+            StartCoroutine(ShowJourneyIntroAfterDelay());
+            return;
+        }
+
+        if (openingBeat == OpeningBeat.TeachSend)
+        {
+            openingBeat = OpeningBeat.TeachClick;
+            PetJourney.ShowJourneyButton();
+            Show("See the Journey button on the right? Click it, and I'll head out on a trip.");
+            return;
+        }
+
+        if (openingBeat == OpeningBeat.TeachClick)
+        {
+            openingBeat = OpeningBeat.None;
+            Hide();
+            return;
+        }
+
         if (!string.IsNullOrEmpty(clickUrl))
         {
             string url = clickUrl;
@@ -190,6 +277,16 @@ public class PetDialogue : MonoBehaviour
             Application.OpenURL(url);
             return;
         }
+
+        if (followupLines != null && followupIndex + 1 < followupLines.Length)
+        {
+            followupIndex++;
+            Show(followupLines[followupIndex]);
+            return;
+        }
+
+        if (followupLines != null)
+            followupLines = null;
 
         if (sequence != null)
         {
@@ -205,7 +302,12 @@ public class PetDialogue : MonoBehaviour
         }
 
         if (playingIntro)
+        {
             playingIntro = false;
+            Hide();
+            StartCoroutine(ShowJourneyIntroAfterDelay());
+            return;
+        }
 
         Hide();
     }
@@ -227,9 +329,25 @@ public class PetDialogue : MonoBehaviour
         return "Hi, " + name + "! I'm Blinky, your companion pets.";
     }
 
+    public static Canvas OverlayCanvas()
+    {
+        var canvases = FindObjectsOfType<Canvas>();
+        for (int i = 0; i < canvases.Length; i++)
+        {
+            Canvas canvas = canvases[i];
+            if (canvas == null || !canvas.isRootCanvas)
+                continue;
+            if (canvas.renderMode != RenderMode.ScreenSpaceOverlay)
+                continue;
+            return canvas;
+        }
+
+        return null;
+    }
+
     void ShowNamePrompt()
     {
-        var canvas = FindObjectOfType<Canvas>();
+        Canvas canvas = OverlayCanvas();
         if (canvas == null)
         {
             FinishNamePrompt("there");
@@ -269,7 +387,7 @@ public class PetDialogue : MonoBehaviour
         label.fontSize = 15;
         label.alignment = TextAnchor.MiddleCenter;
         label.color = new Color(0.24f, 0.16f, 0.12f, 1f);
-        label.text = "Please enter your username";
+        label.text = "Your name";
         label.raycastTarget = false;
     }
 
@@ -376,40 +494,123 @@ public class PetDialogue : MonoBehaviour
             Destroy(namePrompt);
         namePrompt = null;
         nameInput = null;
+        if (PetPhone.Instance != null)
+            PetPhone.Instance.EndNameEntry();
 
         if (speaker != null && !PetJourney.PetIsAway)
-        {
             speaker.enabled = true;
-            PlayEnter();
-        }
-        if (playIntroOnStart)
-            StartCoroutine(BeginIntroAfterEnter());
+        openingBeat = OpeningBeat.Greet;
+        Show("Hello, " + PlayerName + ".");
     }
 
-    IEnumerator BeginIntroAfterEnter()
+    IEnumerator AppearInCenter()
     {
-        float enterLength = EnterClipLength();
-        if (enterLength > 0f)
-            yield return new WaitForSecondsRealtime(enterLength);
+        transform.localPosition = Vector3.zero;
+        transform.localRotation = Quaternion.identity;
+        transform.localScale = Vector3.zero;
+        if (speaker != null)
+            speaker.enabled = true;
 
-        yield return new WaitForSecondsRealtime(1f);
-        BeginIntro();
+        yield return StartCoroutine(PlayClipAndWait("JourneyEnd"));
+        transform.localScale = new Vector3(0.5f, 0.5f, 0.5f);
+        if (speaker != null)
+            speaker.enabled = true;
+        openingBeat = OpeningBeat.AskName;
+        Show("Hi, I'm Blinky, your companion pet. What should I call you?");
     }
 
-    float EnterClipLength()
+    IEnumerator MoveToCorner()
+    {
+        yield return StartCoroutine(PlayClipAndWait("Enter"));
+        openingBeat = OpeningBeat.Stay;
+        Show("I think I'll just stay here.");
+    }
+
+    IEnumerator PlayClipAndWait(string stateName)
     {
         var animator = GetComponent<Animator>();
         if (animator == null || animator.runtimeAnimatorController == null)
-            return 0f;
+        {
+            if (transform.localScale.sqrMagnitude < 0.0001f)
+                transform.localScale = new Vector3(0.5f, 0.5f, 0.5f);
+            yield break;
+        }
 
+        animator.Play(stateName, 0, 0f);
+        animator.Update(0f);
+
+        float length = ClipLength(animator, stateName);
+        float timeout = Mathf.Max(length, 0.1f) + 0.35f;
+        float elapsed = 0f;
+        bool finished = false;
+        while (elapsed < timeout)
+        {
+            yield return null;
+            elapsed += animator.updateMode == AnimatorUpdateMode.UnscaledTime
+                ? Time.unscaledDeltaTime
+                : Time.deltaTime;
+
+            AnimatorStateInfo info = animator.GetCurrentAnimatorStateInfo(0);
+            if (info.IsName(stateName) && !animator.IsInTransition(0) && info.normalizedTime >= 1f)
+            {
+                finished = true;
+                break;
+            }
+
+            // Enter already has an exit into Idle. Leaving the clip is the ending, not a restart.
+            if (!info.IsName(stateName) && elapsed >= length)
+            {
+                finished = true;
+                break;
+            }
+
+            // Only push the state back on if Play has not been accepted yet.
+            if (!info.IsName(stateName) && elapsed < 0.15f)
+                animator.Play(stateName, 0, 0f);
+        }
+
+        if (!finished && animator.GetCurrentAnimatorStateInfo(0).IsName(stateName))
+        {
+            animator.Play(stateName, 0, 1f);
+            animator.Update(0f);
+        }
+
+        if (stateName == "JourneyEnd")
+            yield break;
+
+        AnimatorStateInfo end = animator.GetCurrentAnimatorStateInfo(0);
+        if (!end.IsName("Idle"))
+        {
+            animator.Play("Idle", 0, 0f);
+            animator.Update(0f);
+        }
+    }
+
+    static float ClipLength(Animator animator, string stateName)
+    {
         AnimationClip[] clips = animator.runtimeAnimatorController.animationClips;
         for (int i = 0; i < clips.Length; i++)
         {
-            if (clips[i] != null && clips[i].name == "Enter")
+            if (clips[i] != null && clips[i].name == stateName)
                 return clips[i].length;
         }
 
         return 0f;
+    }
+
+    public void CloseForJourney()
+    {
+        openingBeat = OpeningBeat.None;
+        if (visible)
+            Hide();
+    }
+
+    IEnumerator ShowJourneyIntroAfterDelay()
+    {
+        yield return new WaitForSecondsRealtime(Mathf.Max(0f, journeyIntroDelay));
+        openingBeat = OpeningBeat.TeachSend;
+        string name = string.IsNullOrWhiteSpace(PlayerName) ? "there" : PlayerName;
+        Show("Alright, " + name + ". It's time I showed you how to send me out to search for memes.");
     }
 
     void HoldIdle()
@@ -422,13 +623,21 @@ public class PetDialogue : MonoBehaviour
         animator.Update(0f);
     }
 
-    void PlayEnter()
+    void PlayPose(string stateName)
     {
         var animator = GetComponent<Animator>();
         if (animator == null || animator.runtimeAnimatorController == null)
             return;
 
-        animator.Play("Enter", 0, 0f);
+        AnimatorStateInfo info = animator.GetCurrentAnimatorStateInfo(0);
+        if (info.IsName(stateName))
+            return;
+        if (info.IsName("JourneyStart"))
+            return;
+        if (info.IsName("JourneyEnd") && info.normalizedTime < 1f)
+            return;
+
+        animator.Play(stateName, 0, 0f);
     }
 
     static Font BuiltinFont()
@@ -441,17 +650,35 @@ public class PetDialogue : MonoBehaviour
 
     public void Show(string text)
     {
-        if (cam == null)
-            cam = Camera.main;
-
-        string content = string.IsNullOrEmpty(text) ? "……" : text;
-        if (bodyText.font != null)
-            bodyText.font.RequestCharactersInTexture(content, bodyText.fontSize, FontStyle.Normal);
-        bodyText.text = Wrap(content, Mathf.Max(4, charactersPerLine));
-        bubbleObject.SetActive(true);
+        currentLine = string.IsNullOrEmpty(text) ? "……" : text;
+        PlaceDialogue(currentLine);
         visible = true;
-        PlaceAboveSpeaker();
-        StartCoroutine(FitText());
+        PlayPose("Talking");
+    }
+
+    public void RefreshPlacement()
+    {
+        if (!visible)
+            return;
+
+        PlaceDialogue(currentLine);
+    }
+
+    void PlaceDialogue(string content)
+    {
+        BindDialogue();
+        if (sceneDialogueText != null)
+            dialogueText = sceneDialogueText;
+        if (dialogueBox == null || dialogueText == null)
+            return;
+
+        ApplyStoryStyle();
+        dialogueText.text = content;
+        if (headBubble != null)
+            headBubble.gameObject.SetActive(true);
+        else
+            dialogueBox.gameObject.SetActive(true);
+        AssignDialogueCamera();
     }
 
     public void Hide()
@@ -459,189 +686,151 @@ public class PetDialogue : MonoBehaviour
         visible = false;
         pressedBubble = false;
         clickUrl = null;
-        if (bubbleObject != null)
-            bubbleObject.SetActive(false);
+        followupLines = null;
+        if (PetPhone.Instance != null)
+            PetPhone.Instance.HideSpeech();
+        if (headBubble != null)
+            headBubble.gameObject.SetActive(false);
+        else if (dialogueBox != null)
+            dialogueBox.gameObject.SetActive(false);
+        PlayPose("Idle");
     }
 
-    void CreateBubble()
+    void BindDialogue()
     {
-        bubbleObject = new GameObject("DialogueBubble");
-        bubbleObject.transform.SetParent(transform, false);
-        bubbleRenderer = bubbleObject.AddComponent<SpriteRenderer>();
-        bubbleRenderer.sprite = CreateBubbleSprite();
-        bubbleRenderer.sortingOrder = 25;
-
-        var textObject = new GameObject("DialogueText");
-        textObject.transform.SetParent(bubbleObject.transform, false);
-        float tailShare = 42f / 250f;
-        float bubbleHeight = bubbleRenderer.sprite.bounds.size.y;
-        textObject.transform.localPosition = new Vector3(0f, bubbleHeight * tailShare * 0.5f, -0.01f);
-
-        bodyText = textObject.AddComponent<TextMesh>();
-        bodyText.anchor = TextAnchor.MiddleCenter;
-        bodyText.alignment = TextAlignment.Center;
-        bodyText.fontSize = 32;
-        bodyText.characterSize = 0.08f;
-        bodyText.color = new Color(0.24f, 0.16f, 0.12f, 1f);
-
-        Font font = Font.CreateDynamicFontFromOSFont(FontCandidates, bodyText.fontSize);
-        if (font != null)
-            bodyText.font = font;
-
-        bodyRenderer = bodyText.GetComponent<MeshRenderer>();
-        bodyRenderer.sortingOrder = 26;
-        if (bodyText.font != null)
-            bodyRenderer.material = bodyText.font.material;
-    }
-
-    Sprite CreateBubbleSprite()
-    {
-        const int width = 520;
-        const int height = 250;
-        const int tailHeight = 42;
-        var texture = new Texture2D(width, height, TextureFormat.RGBA32, false);
-        texture.filterMode = FilterMode.Bilinear;
-        texture.wrapMode = TextureWrapMode.Clamp;
-
-        var fill = new Color(0.99f, 0.96f, 0.9f, 1f);
-        var border = new Color(0.42f, 0.26f, 0.18f, 1f);
-        var pixels = new Color[width * height];
-        float radius = 40f;
-        int bodyHeight = height - tailHeight;
-        int center = width / 2;
-        int tailHalf = 34;
-
-        for (int y = 0; y < height; y++)
+        if (dialogueBox == null && !BindHeadDialogue())
         {
-            for (int x = 0; x < width; x++)
+            var images = FindObjectsOfType<Image>(true);
+            for (int i = 0; i < images.Length; i++)
             {
-                bool inside;
-                bool edge;
-                if (y >= tailHeight)
-                {
-                    float outside = RoundedOutside(x, y - tailHeight, width, bodyHeight, radius);
-                    inside = outside <= radius;
-                    edge = inside && outside > radius - 7f;
-                }
-                else
-                {
-                    float t = tailHeight <= 1 ? 1f : y / (float)(tailHeight - 1);
-                    float half = Mathf.Lerp(2f, tailHalf, t);
-                    float dist = Mathf.Abs(x - center);
-                    inside = dist <= half;
-                    edge = inside && dist >= half - 6f;
-                }
-
-                if (!inside)
+                if (images[i].gameObject.name != "Image")
                     continue;
-
-                Color color = edge ? border : fill;
-                color.r = Mathf.Max(color.r, 0.05f);
-                color.g = Mathf.Max(color.g, 0.05f);
-                color.b = Mathf.Max(color.b, 0.05f);
-                pixels[y * width + x] = color;
-            }
-        }
-
-        texture.SetPixels(pixels);
-        texture.Apply();
-        float pixelsPerUnit = width / Mathf.Max(0.1f, bubbleSize.x);
-        return Sprite.Create(texture, new Rect(0f, 0f, width, height), new Vector2(0.5f, 0.5f), pixelsPerUnit);
-    }
-
-    static float RoundedOutside(int x, int y, int width, int height, float radius)
-    {
-        float left = radius;
-        float right = width - 1 - radius;
-        float bottom = radius;
-        float top = height - 1 - radius;
-        float px = Mathf.Clamp(x, left, right);
-        float py = Mathf.Clamp(y, bottom, top);
-        float dx = x - px;
-        float dy = y - py;
-        return Mathf.Sqrt(dx * dx + dy * dy);
-    }
-
-    static string Wrap(string text, int perLine)
-    {
-        if (string.IsNullOrEmpty(text) || perLine < 1 || text.Length <= perLine)
-            return text;
-
-        var wrapped = new System.Text.StringBuilder(text.Length + 8);
-        int index = 0;
-        while (index < text.Length)
-        {
-            if (text[index] == '\n')
-            {
-                wrapped.Append('\n');
-                index++;
-                continue;
-            }
-
-            int remaining = text.Length - index;
-            if (remaining <= perLine)
-            {
-                wrapped.Append(text, index, remaining);
+                if (images[i].GetComponentInChildren<Text>(true) == null)
+                    continue;
+                Canvas imageCanvas = images[i].GetComponentInParent<Canvas>();
+                if (imageCanvas != null && imageCanvas.renderMode != RenderMode.ScreenSpaceOverlay)
+                    continue;
+                dialogueBox = images[i].rectTransform;
                 break;
             }
-
-            int end = index + perLine - 1;
-            int breakAt = text.LastIndexOf(' ', end, perLine);
-            if (breakAt <= index)
-                breakAt = index + perLine;
-
-            wrapped.Append(text, index, breakAt - index);
-            wrapped.Append('\n');
-            index = breakAt < text.Length && text[breakAt] == ' ' ? breakAt + 1 : breakAt;
         }
 
-        return wrapped.ToString().TrimEnd('\n');
+        if (sceneDialogueText == null && dialogueBox != null)
+            sceneDialogueText = dialogueBox.GetComponentInChildren<Text>(true);
+        if (dialogueText == null)
+            dialogueText = sceneDialogueText;
+        CacheDefaultStyle();
+        AssignDialogueCamera();
     }
 
-    IEnumerator FitText()
+    bool BindHeadDialogue()
     {
-        yield return null;
-        if (!visible || bodyText == null || bodyRenderer == null || bubbleRenderer == null)
-            yield break;
+        var canvases = GetComponentsInChildren<Canvas>(true);
+        for (int i = 0; i < canvases.Length; i++)
+        {
+            Canvas canvas = canvases[i];
+            if (canvas == null || canvas.renderMode != RenderMode.WorldSpace)
+                continue;
 
-        bodyText.transform.localScale = Vector3.one;
-        float textWidth = bodyRenderer.bounds.size.x;
-        float textHeight = bodyRenderer.bounds.size.y;
-        float bubbleWidth = bubbleRenderer.bounds.size.x;
-        float bubbleHeight = bubbleRenderer.bounds.size.y;
-        if (textWidth < 0.001f || textHeight < 0.001f || bubbleWidth < 0.001f || bubbleHeight < 0.001f)
-            yield break;
+            Text text = canvas.GetComponentInChildren<Text>(true);
+            if (text == null)
+                continue;
 
-        float innerWidth = bubbleWidth * 0.78f;
-        float innerHeight = bubbleHeight * 0.48f;
-        float scale = Mathf.Min(innerWidth / textWidth, innerHeight / textHeight);
-        bodyText.transform.localScale = new Vector3(scale, scale, 1f);
+            dialogueBox = canvas.GetComponent<RectTransform>();
+            sceneDialogueText = text;
+            dialogueText = text;
+            Transform parent = canvas.transform.parent;
+            headBubble = parent != null && parent != transform ? parent : canvas.transform;
+            return true;
+        }
+
+        return false;
     }
 
-    void PlaceAboveSpeaker()
+    void AssignDialogueCamera()
     {
-        if (speaker == null || bubbleRenderer == null || bubbleRenderer.sprite == null)
+        if (dialogueBox == null)
             return;
 
-        float height = bubbleRenderer.sprite.bounds.size.y * bubbleRenderer.transform.lossyScale.y;
-        Bounds speakerBounds = speaker.bounds;
-        float y = speakerBounds.max.y + gap + height * 0.5f;
-        float limit = 4.55f;
-        if (y + height * 0.5f > limit)
-            y = limit - height * 0.5f;
+        Canvas canvas = dialogueBox.GetComponentInParent<Canvas>();
+        if (canvas == null || canvas.renderMode == RenderMode.ScreenSpaceOverlay)
+            return;
+        if (cam == null)
+            cam = Camera.main;
+        if (cam != null && canvas.worldCamera == null)
+            canvas.worldCamera = cam;
+    }
 
-        bubbleObject.transform.position = new Vector3(speakerBounds.center.x, y, speaker.transform.position.z);
+    void CacheDefaultStyle()
+    {
+        if (styleCached || sceneDialogueText == null)
+            return;
+
+        defaultFont = sceneDialogueText.font;
+        defaultColor = sceneDialogueText.color;
+        styleCached = true;
+    }
+
+    void ApplyStoryStyle()
+    {
+        CacheDefaultStyle();
+        if (dialogueText == null)
+            return;
+
+        PetStory.Phase phase = PetStory.Current;
+        if (phase == PetStory.Phase.StateI)
+        {
+            dialogueText.font = LoadStoryFont("Fonts/SourceSerif4-Regular");
+            dialogueText.color = StateIColor;
+            return;
+        }
+
+        if (phase == PetStory.Phase.StateII)
+        {
+            dialogueText.font = LoadStoryFont("Fonts/IBMPlexSerif-Regular");
+            dialogueText.color = StateIIColor;
+            return;
+        }
+
+        if (defaultFont != null)
+            dialogueText.font = defaultFont;
+        dialogueText.color = defaultColor;
+    }
+
+    Font LoadStoryFont(string resourcePath)
+    {
+        Font font = Resources.Load<Font>(resourcePath);
+        return font != null ? font : defaultFont;
     }
 
     bool HitsBubble(Vector2 screenPoint)
     {
-        if (!visible || bubbleRenderer == null || bubbleRenderer.sprite == null || cam == null)
+        if (!visible || dialogueBox == null)
             return false;
 
-        float depth = Mathf.Abs(cam.transform.position.z - bubbleRenderer.transform.position.z);
-        Vector3 world = cam.ScreenToWorldPoint(new Vector3(screenPoint.x, screenPoint.y, depth));
-        world.z = bubbleRenderer.bounds.center.z;
-        return bubbleRenderer.bounds.Contains(world);
+        Camera eventCamera = cam;
+        Canvas canvas = dialogueBox.GetComponentInParent<Canvas>();
+        if (canvas != null && canvas.renderMode == RenderMode.ScreenSpaceOverlay)
+            eventCamera = null;
+        else if (canvas != null && canvas.worldCamera != null)
+            eventCamera = canvas.worldCamera;
+
+        if (RectTransformUtility.RectangleContainsScreenPoint(dialogueBox, screenPoint, eventCamera))
+            return true;
+
+        SpriteRenderer bubble = headBubble != null ? headBubble.GetComponent<SpriteRenderer>() : null;
+        if (bubble == null || bubble.sprite == null || cam == null)
+            return false;
+
+        Bounds bounds = bubble.bounds;
+        Vector3 min = cam.WorldToScreenPoint(new Vector3(bounds.min.x, bounds.min.y, bounds.center.z));
+        Vector3 max = cam.WorldToScreenPoint(new Vector3(bounds.max.x, bounds.max.y, bounds.center.z));
+        var screenRect = Rect.MinMaxRect(
+            Mathf.Min(min.x, max.x),
+            Mathf.Min(min.y, max.y),
+            Mathf.Max(min.x, max.x),
+            Mathf.Max(min.y, max.y));
+        return screenRect.Contains(screenPoint);
     }
 
     Vector2 PointerScreen()

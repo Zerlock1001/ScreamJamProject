@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.UI;
 
 /// <summary>
 /// Windows 独立构建：无边框小窗、背景透明、透明像素把点击交给后面的窗口。
@@ -34,6 +35,7 @@ public class DesktopPetWindow : MonoBehaviour
     const int WsExWindowEdge = 0x00000100;
     const int WsExClientEdge = 0x00000200;
     const int WsExStaticEdge = 0x00020000;
+    const int WsExTransparent = 0x00000020;
     const int WsExToolWindow = 0x00000080;
     const int WsExAppWindow = 0x00040000;
 
@@ -47,9 +49,13 @@ public class DesktopPetWindow : MonoBehaviour
 
     const int WmNcLButtonDown = 0x00A1;
     const uint WmNcHitTest = 0x0084;
+    const uint WmWindowPosChanging = 0x0046;
     const int HtTransparent = -1;
     const int HtCaption = 0x2;
+    const uint MonitorDefaultToPrimary = 1;
     const uint MonitorDefaultToNearest = 2;
+    const int SmCxScreen = 0;
+    const int SmCyScreen = 1;
 
     static readonly IntPtr HwndTopMost = new IntPtr(-1);
     static readonly IntPtr HwndNoTopMost = new IntPtr(-2);
@@ -78,10 +84,21 @@ public class DesktopPetWindow : MonoBehaviour
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     delegate IntPtr WndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
+    struct ClientRect
+    {
+        public int left;
+        public int top;
+        public int right;
+        public int bottom;
+    }
+
+    delegate bool EnumChildProc(IntPtr hWnd, IntPtr lParam);
+
     static DesktopPetWindow instance;
     static WndProc procDelegate;
     static IntPtr procPtr;
-    static IntPtr prevProc;
+    static EnumChildProc childEnum;
+    static readonly Dictionary<IntPtr, IntPtr> prevByHwnd = new Dictionary<IntPtr, IntPtr>();
     static bool dragging;
 
     IntPtr hwnd;
@@ -96,8 +113,19 @@ public class DesktopPetWindow : MonoBehaviour
     int bufferHeight = 1;
     readonly List<SpriteSample> samples = new List<SpriteSample>();
     readonly Dictionary<int, Color32[]> pixelCache = new Dictionary<int, Color32[]>();
-    readonly List<RaycastResult> uiHits = new List<RaycastResult>();
+    readonly List<Rect> scratchUi = new List<Rect>();
+    readonly List<Rect> scratchSprites = new List<Rect>();
+    readonly List<ClientRect> scratchClient = new List<ClientRect>();
+    readonly List<IntPtr> regionTargets = new List<IntPtr>();
+    readonly List<IntPtr> pendingChildren = new List<IntPtr>();
     readonly Vector3[] uiCorners = new Vector3[4];
+    SpriteSample[] sampleSnapshot = Array.Empty<SpriteSample>();
+    Rect[] interfaceSnapshot = Array.Empty<Rect>();
+    Rect[] spriteScreenSnapshot = Array.Empty<Rect>();
+    ClientRect[] clientSnapshot = Array.Empty<ClientRect>();
+    int appliedRegionHash = int.MinValue;
+    bool regionDirty = true;
+    bool spritesFullyMapped;
 #endif
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
@@ -149,6 +177,8 @@ public class DesktopPetWindow : MonoBehaviour
         ConfigureCamera();
         CacheHitData();
         EnsureHook();
+        UpdateClickThrough();
+        ApplyHitRegion();
 
         bool overVisible = IsCursorOverVisiblePixel() && !IsPointerOverUi();
         if (Input.GetMouseButtonDown(0) && overVisible)
@@ -252,6 +282,7 @@ public class DesktopPetWindow : MonoBehaviour
     IEnumerator SetupWindow()
     {
         Screen.fullScreenMode = FullScreenMode.Windowed;
+        ClampBelowPrimaryMonitor(ref windowWidth, ref windowHeight);
         if (Screen.fullScreen || Screen.width != windowWidth || Screen.height != windowHeight)
             Screen.SetResolution(windowWidth, windowHeight, FullScreenMode.Windowed);
 
@@ -343,17 +374,12 @@ public class DesktopPetWindow : MonoBehaviour
         var info = new MonitorInfo { cbSize = Marshal.SizeOf(typeof(MonitorInfo)) };
         if (monitor != IntPtr.Zero && GetMonitorInfo(monitor, ref info))
         {
-            int workWidth = Mathf.Max(1, info.rcWork.right - info.rcWork.left);
-            int workHeight = Mathf.Max(1, info.rcWork.bottom - info.rcWork.top);
-            // A window that exactly covers the monitor is treated as fullscreen and stops letting clicks through.
-            if (width >= workWidth)
-                width = workWidth - 1;
-            if (height >= workHeight)
-                height = workHeight - 1;
+            FitInside(ref width, ref height, info.rcMonitor);
+            FitInside(ref width, ref height, info.rcWork);
             x = info.rcWork.right - width - screenMargin;
             y = info.rcWork.bottom - height - screenMargin;
-            x = Mathf.Clamp(x, info.rcWork.left, info.rcWork.right - width);
-            y = Mathf.Clamp(y, info.rcWork.top, info.rcWork.bottom - height);
+            x = Mathf.Clamp(x, info.rcWork.left, Mathf.Max(info.rcWork.left, info.rcWork.right - width));
+            y = Mathf.Clamp(y, info.rcWork.top, Mathf.Max(info.rcWork.top, info.rcWork.bottom - height));
         }
 
         SetWindowPos(hwnd, zOrder, x, y, width, height, SwpFrameChanged | SwpShowWindow);
@@ -369,21 +395,83 @@ public class DesktopPetWindow : MonoBehaviour
         if (monitor == IntPtr.Zero || !GetMonitorInfo(monitor, ref info))
             return;
 
-        int workWidth = info.rcWork.right - info.rcWork.left;
-        int workHeight = info.rcWork.bottom - info.rcWork.top;
         int width = window.right - window.left;
         int height = window.bottom - window.top;
-        if (workWidth <= 1 || workHeight <= 1 || (width < workWidth && height < workHeight))
+        int fittedWidth = width;
+        int fittedHeight = height;
+        FitInside(ref fittedWidth, ref fittedHeight, info.rcMonitor);
+        FitInside(ref fittedWidth, ref fittedHeight, info.rcWork);
+        int x = Mathf.Clamp(window.left, info.rcWork.left, Mathf.Max(info.rcWork.left, info.rcWork.right - fittedWidth));
+        int y = Mathf.Clamp(window.top, info.rcWork.top, Mathf.Max(info.rcWork.top, info.rcWork.bottom - fittedHeight));
+        bool coversMonitor = window.left <= info.rcMonitor.left
+            && window.top <= info.rcMonitor.top
+            && window.right >= info.rcMonitor.right
+            && window.bottom >= info.rcMonitor.bottom;
+        if (!coversMonitor && fittedWidth == width && fittedHeight == height && x == window.left && y == window.top)
             return;
 
-        if (width >= workWidth)
-            width = workWidth - 1;
-        if (height >= workHeight)
-            height = workHeight - 1;
-        int x = Mathf.Clamp(window.left, info.rcWork.left, info.rcWork.right - width);
-        int y = Mathf.Clamp(window.top, info.rcWork.top, info.rcWork.bottom - height);
+        width = fittedWidth;
+        height = fittedHeight;
         IntPtr zOrder = alwaysOnTop ? HwndTopMost : HwndNoTopMost;
         SetWindowPos(hwnd, zOrder, x, y, width, height, SwpFrameChanged | SwpShowWindow);
+        windowWidth = width;
+        windowHeight = height;
+        regionDirty = true;
+    }
+
+    void UpdateClickThrough()
+    {
+        if (hwnd == IntPtr.Zero)
+            return;
+
+        bool solid = IsCursorOverVisiblePixel();
+        bool changed = false;
+        for (int i = 0; i < regionTargets.Count; i++)
+            changed |= SetPassThrough(regionTargets[i], !solid);
+        if (regionTargets.Count == 0)
+            changed |= SetPassThrough(hwnd, !solid);
+        if (changed)
+            regionDirty = true;
+    }
+
+    bool SetPassThrough(IntPtr target, bool passThrough)
+    {
+        if (target == IntPtr.Zero)
+            return false;
+
+        int exStyle = GetWindowLong(target, GwlExStyle);
+        bool current = (exStyle & WsExTransparent) != 0;
+        if (current == passThrough)
+            return false;
+
+        if (passThrough)
+            exStyle |= WsExTransparent;
+        else
+            exStyle &= ~WsExTransparent;
+        SetWindowLong(target, GwlExStyle, exStyle);
+        IntPtr zOrder = alwaysOnTop ? HwndTopMost : HwndNoTopMost;
+        SetWindowPos(target, zOrder, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpFrameChanged | SwpShowWindow);
+        return true;
+    }
+
+    static void FitInside(ref int width, ref int height, NativeRect area)
+    {
+        int areaWidth = area.right - area.left;
+        int areaHeight = area.bottom - area.top;
+        if (areaWidth > 1 && width >= areaWidth)
+            width = areaWidth - 1;
+        if (areaHeight > 1 && height >= areaHeight)
+            height = areaHeight - 1;
+    }
+
+    static void ClampBelowPrimaryMonitor(ref int width, ref int height)
+    {
+        int screenWidth = GetSystemMetrics(SmCxScreen);
+        int screenHeight = GetSystemMetrics(SmCyScreen);
+        if (screenWidth > 1 && width >= screenWidth)
+            width = screenWidth - 1;
+        if (screenHeight > 1 && height >= screenHeight)
+            height = screenHeight - 1;
     }
 
     void CacheHitData()
@@ -403,6 +491,9 @@ public class DesktopPetWindow : MonoBehaviour
         bufferHeight = Mathf.Max(1, Screen.height);
 
         samples.Clear();
+        scratchUi.Clear();
+        scratchSprites.Clear();
+        scratchClient.Clear();
         var renderers = FindObjectsOfType<SpriteRenderer>();
         for (int i = 0; i < renderers.Length; i++)
         {
@@ -441,7 +532,108 @@ public class DesktopPetWindow : MonoBehaviour
             }
 
             samples.Add(sample);
+            if (TryGetSpriteScreenRect(sample, out Rect spriteRect))
+            {
+                scratchSprites.Add(spriteRect);
+                AddClientRect(spriteRect);
+            }
         }
+
+        CollectGraphics();
+        sampleSnapshot = samples.ToArray();
+        interfaceSnapshot = scratchUi.ToArray();
+        spriteScreenSnapshot = scratchSprites.ToArray();
+        clientSnapshot = scratchClient.ToArray();
+        spritesFullyMapped = scratchSprites.Count == samples.Count;
+    }
+
+    void CollectGraphics()
+    {
+        var graphics = FindObjectsOfType<Graphic>();
+        for (int i = 0; i < graphics.Length; i++)
+        {
+            Graphic graphic = graphics[i];
+            if (graphic == null || !graphic.enabled || !graphic.gameObject.activeInHierarchy)
+                continue;
+            if (graphic.color.a <= 0.04f)
+                continue;
+            if (!TryGetScreenRect(graphic, out Rect screenRect))
+                continue;
+            if (screenRect.width >= bufferWidth * 0.92f && screenRect.height >= bufferHeight * 0.92f)
+                continue;
+
+            AddClientRect(screenRect);
+            if (graphic.raycastTarget && graphic.color.a > clickAlphaThreshold)
+                scratchUi.Add(screenRect);
+        }
+    }
+
+    bool TryGetSpriteScreenRect(SpriteSample sample, out Rect screenRect)
+    {
+        screenRect = default;
+        if (cam == null)
+            return false;
+
+        Matrix4x4 localToWorld = sample.worldToLocal.inverse;
+        float minX = float.PositiveInfinity;
+        float minY = float.PositiveInfinity;
+        float maxX = float.NegativeInfinity;
+        float maxY = float.NegativeInfinity;
+        float z = (sample.bounds.min.z + sample.bounds.max.z) * 0.5f;
+        Vector3 min = sample.bounds.min;
+        Vector3 max = sample.bounds.max;
+        Vector3[] local =
+        {
+            new Vector3(min.x, min.y, z),
+            new Vector3(min.x, max.y, z),
+            new Vector3(max.x, min.y, z),
+            new Vector3(max.x, max.y, z)
+        };
+
+        for (int i = 0; i < 4; i++)
+        {
+            Vector3 screen = cam.WorldToScreenPoint(localToWorld.MultiplyPoint3x4(local[i]));
+            if (screen.z < 0f || float.IsNaN(screen.x) || float.IsNaN(screen.y) || float.IsInfinity(screen.x) || float.IsInfinity(screen.y))
+                return false;
+            minX = Mathf.Min(minX, screen.x);
+            minY = Mathf.Min(minY, screen.y);
+            maxX = Mathf.Max(maxX, screen.x);
+            maxY = Mathf.Max(maxY, screen.y);
+        }
+
+        if (maxX - minX < 1f || maxY - minY < 1f)
+            return false;
+
+        screenRect = Rect.MinMaxRect(minX, minY, maxX, maxY);
+        return true;
+    }
+
+    void AddClientRect(Rect screen)
+    {
+        if (!GetClientRect(hwnd, out NativeRect area))
+            return;
+
+        int clientWidth = area.right - area.left;
+        int clientHeight = area.bottom - area.top;
+        if (clientWidth <= 1 || clientHeight <= 1 || bufferWidth <= 1 || bufferHeight <= 1)
+            return;
+        if (float.IsNaN(screen.xMin) || float.IsNaN(screen.yMin) || float.IsInfinity(screen.xMax) || float.IsInfinity(screen.yMax))
+            return;
+
+        float x0 = screen.xMin / bufferWidth * clientWidth;
+        float x1 = screen.xMax / bufferWidth * clientWidth;
+        float y0 = (bufferHeight - screen.yMax) / bufferHeight * clientHeight;
+        float y1 = (bufferHeight - screen.yMin) / bufferHeight * clientHeight;
+        var client = new ClientRect
+        {
+            left = Mathf.FloorToInt(Mathf.Min(x0, x1)) - 8,
+            right = Mathf.CeilToInt(Mathf.Max(x0, x1)) + 8,
+            top = Mathf.FloorToInt(Mathf.Min(y0, y1)) - 8,
+            bottom = Mathf.CeilToInt(Mathf.Max(y0, y1)) + 8
+        };
+        if (client.right <= client.left || client.bottom <= client.top)
+            return;
+        scratchClient.Add(client);
     }
 
     bool IsCursorOverVisiblePixel()
@@ -474,41 +666,59 @@ public class DesktopPetWindow : MonoBehaviour
 
         screenPx = (point.x + 0.5f) * bufferWidth / clientWidth;
         screenPy = (clientHeight - point.y - 0.5f) * bufferHeight / clientHeight;
-        return HitsInterface(screenPx, screenPy) || HitWorld(ScreenPointToWorld(screenPx, screenPy));
+        var cursor = new Vector2(screenPx, screenPy);
+        if (ContainsPoint(interfaceSnapshot, cursor))
+            return true;
+        if (!ContainsPoint(spriteScreenSnapshot, cursor))
+            return false;
+        return HitWorld(ScreenPointToWorld(screenPx, screenPy));
     }
 
-    bool HitsInterface(float screenX, float screenY)
+    static bool ContainsPoint(Rect[] rects, Vector2 point)
     {
-        if (EventSystem.current == null)
-            return false;
-
-        var pointer = new PointerEventData(EventSystem.current)
+        for (int i = 0; i < rects.Length; i++)
         {
-            position = new Vector2(screenX, screenY)
-        };
-        uiHits.Clear();
-        EventSystem.current.RaycastAll(pointer, uiHits);
-        for (int i = 0; i < uiHits.Count; i++)
-        {
-            var graphic = uiHits[i].gameObject.GetComponent<UnityEngine.UI.Graphic>();
-            if (graphic == null || !graphic.raycastTarget || !graphic.enabled)
-                continue;
-            if (graphic.color.a <= clickAlphaThreshold)
-                continue;
-            if (CoversWindow(graphic) && graphic.color.a < 0.95f)
-                continue;
-            return true;
+            if (rects[i].Contains(point))
+                return true;
         }
 
         return false;
     }
 
-    bool CoversWindow(UnityEngine.UI.Graphic graphic)
+    bool TryGetScreenRect(UnityEngine.UI.Graphic graphic, out Rect screenRect)
     {
+        screenRect = default;
+        if (graphic.rectTransform == null)
+            return false;
+
         graphic.rectTransform.GetWorldCorners(uiCorners);
-        float width = uiCorners[2].x - uiCorners[0].x;
-        float height = uiCorners[2].y - uiCorners[0].y;
-        return width >= bufferWidth * 0.92f && height >= bufferHeight * 0.92f;
+        Camera eventCamera = null;
+        Canvas canvas = graphic.canvas;
+        if (canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay)
+            eventCamera = canvas.worldCamera != null ? canvas.worldCamera : cam;
+
+        float minX = float.PositiveInfinity;
+        float minY = float.PositiveInfinity;
+        float maxX = float.NegativeInfinity;
+        float maxY = float.NegativeInfinity;
+        for (int i = 0; i < 4; i++)
+        {
+            Vector3 screen = eventCamera != null ? eventCamera.WorldToScreenPoint(uiCorners[i]) : uiCorners[i];
+            if (float.IsNaN(screen.x) || float.IsNaN(screen.y) || float.IsInfinity(screen.x) || float.IsInfinity(screen.y))
+                return false;
+            if (screen.z < 0f && eventCamera != null)
+                return false;
+            minX = Mathf.Min(minX, screen.x);
+            minY = Mathf.Min(minY, screen.y);
+            maxX = Mathf.Max(maxX, screen.x);
+            maxY = Mathf.Max(maxY, screen.y);
+        }
+
+        if (maxX - minX < 1f || maxY - minY < 1f)
+            return false;
+
+        screenRect = Rect.MinMaxRect(minX, minY, maxX, maxY);
+        return true;
     }
 
     Vector3 ScreenPointToWorld(float screenX, float screenY)
@@ -524,9 +734,9 @@ public class DesktopPetWindow : MonoBehaviour
     bool HitWorld(Vector3 worldOnCameraPlane)
     {
         Vector3 direction = camRotation * Vector3.forward;
-        for (int i = 0; i < samples.Count; i++)
+        for (int i = 0; i < sampleSnapshot.Length; i++)
         {
-            SpriteSample sample = samples[i];
+            SpriteSample sample = sampleSnapshot[i];
             float denom = Vector3.Dot(direction, sample.planeNormal);
             Vector3 world = worldOnCameraPlane;
             if (Mathf.Abs(denom) > 0.0001f)
@@ -537,6 +747,10 @@ public class DesktopPetWindow : MonoBehaviour
 
             Vector3 local = sample.worldToLocal.MultiplyPoint3x4(world);
             Bounds bounds = sample.bounds;
+            if (float.IsNaN(bounds.min.x) || float.IsNaN(bounds.max.x) || float.IsNaN(bounds.min.y) || float.IsNaN(bounds.max.y))
+                continue;
+            if (bounds.max.x - bounds.min.x > 40f || bounds.max.y - bounds.min.y > 40f)
+                continue;
             if (local.x < bounds.min.x || local.x > bounds.max.x || local.y < bounds.min.y || local.y > bounds.max.y)
                 continue;
             if (bounds.size.x <= 0.0001f || bounds.size.y <= 0.0001f)
@@ -575,45 +789,247 @@ public class DesktopPetWindow : MonoBehaviour
             procPtr = Marshal.GetFunctionPointerForDelegate(procDelegate);
         }
 
-        IntPtr current = GetWindowLongPtr(hwnd, GwlpWndProc);
+        if (childEnum == null)
+            childEnum = OnChildWindow;
+
+        var wanted = new List<IntPtr> { hwnd };
+        pendingChildren.Clear();
+        EnumChildWindows(hwnd, childEnum, IntPtr.Zero);
+        for (int i = 0; i < pendingChildren.Count; i++)
+        {
+            IntPtr child = pendingChildren[i];
+            if (child != IntPtr.Zero && !wanted.Contains(child))
+                wanted.Add(child);
+        }
+        pendingChildren.Clear();
+
+        var stale = new List<IntPtr>();
+        foreach (KeyValuePair<IntPtr, IntPtr> pair in prevByHwnd)
+        {
+            if (!wanted.Contains(pair.Key))
+                stale.Add(pair.Key);
+        }
+
+        for (int i = 0; i < stale.Count; i++)
+            Unhook(stale[i]);
+        for (int i = 0; i < wanted.Count; i++)
+            HookOne(wanted[i]);
+
+        regionTargets.Clear();
+        regionTargets.AddRange(wanted);
+    }
+
+    static bool OnChildWindow(IntPtr child, IntPtr unused)
+    {
+        if (instance == null || child == IntPtr.Zero)
+            return true;
+        if (!GetClientRect(instance.hwnd, out NativeRect parent) || !GetClientRect(child, out NativeRect childRect))
+            return true;
+
+        int parentWidth = parent.right - parent.left;
+        int parentHeight = parent.bottom - parent.top;
+        int childWidth = childRect.right - childRect.left;
+        int childHeight = childRect.bottom - childRect.top;
+        if (parentWidth <= 0 || parentHeight <= 0)
+            return true;
+        if (childWidth * 2 < parentWidth || childHeight * 2 < parentHeight)
+            return true;
+
+        instance.pendingChildren.Add(child);
+        return true;
+    }
+
+    void HookOne(IntPtr target)
+    {
+        if (target == IntPtr.Zero || procPtr == IntPtr.Zero)
+            return;
+
+        IntPtr current = GetWindowLongPtr(target, GwlpWndProc);
         if (current == procPtr || current == IntPtr.Zero)
             return;
 
-        prevProc = current;
-        SetWindowLongPtr(hwnd, GwlpWndProc, procPtr);
+        prevByHwnd[target] = current;
+        SetWindowLongPtr(target, GwlpWndProc, procPtr);
+    }
+
+    void Unhook(IntPtr target)
+    {
+        if (!prevByHwnd.TryGetValue(target, out IntPtr previous))
+            return;
+
+        IntPtr current = GetWindowLongPtr(target, GwlpWndProc);
+        if (current == procPtr && previous != IntPtr.Zero)
+            SetWindowLongPtr(target, GwlpWndProc, previous);
+        prevByHwnd.Remove(target);
+        SetWindowRgn(target, IntPtr.Zero, false);
     }
 
     void RestoreHook()
     {
-        if (hwnd == IntPtr.Zero || procPtr == IntPtr.Zero || prevProc == IntPtr.Zero)
+        var hooked = new List<IntPtr>(prevByHwnd.Keys);
+        for (int i = 0; i < hooked.Count; i++)
+            Unhook(hooked[i]);
+        regionTargets.Clear();
+        appliedRegionHash = int.MinValue;
+        regionDirty = true;
+    }
+
+    void ApplyHitRegion()
+    {
+        if (hwnd == IntPtr.Zero)
             return;
 
-        IntPtr current = GetWindowLongPtr(hwnd, GwlpWndProc);
-        if (current == procPtr)
-            SetWindowLongPtr(hwnd, GwlpWndProc, prevProc);
-        prevProc = IntPtr.Zero;
+        int hash = 23 + regionTargets.Count;
+        for (int i = 0; i < clientSnapshot.Length; i++)
+        {
+            ClientRect rect = clientSnapshot[i];
+            hash = hash * 31 + rect.left;
+            hash = hash * 31 + rect.top;
+            hash = hash * 31 + rect.right;
+            hash = hash * 31 + rect.bottom;
+        }
+
+        if (!regionDirty && hash == appliedRegionHash)
+            return;
+
+        bool keepFullWindow = sampleSnapshot.Length > 0 && !spritesFullyMapped;
+        var targets = regionTargets.Count > 0 ? regionTargets : new List<IntPtr> { hwnd };
+        for (int i = 0; i < targets.Count; i++)
+        {
+            IntPtr target = targets[i];
+            if (target == IntPtr.Zero)
+                continue;
+            if (keepFullWindow)
+            {
+                SetWindowRgn(target, IntPtr.Zero, false);
+                continue;
+            }
+
+            IntPtr region = BuildRegionFor(target);
+            if (region == IntPtr.Zero)
+                continue;
+            if (SetWindowRgn(target, region, false) == 0)
+                DeleteObject(region);
+        }
+
+        appliedRegionHash = hash;
+        regionDirty = false;
+    }
+
+    IntPtr BuildRegionFor(IntPtr target)
+    {
+        int dx = 0;
+        int dy = 0;
+        if (target != hwnd)
+        {
+            var rootOrigin = new NativePoint();
+            var targetOrigin = new NativePoint();
+            ClientToScreen(hwnd, ref rootOrigin);
+            ClientToScreen(target, ref targetOrigin);
+            dx = rootOrigin.x - targetOrigin.x;
+            dy = rootOrigin.y - targetOrigin.y;
+        }
+
+        IntPtr region = CreateRectRgn(0, 0, 0, 0);
+        for (int i = 0; i < clientSnapshot.Length; i++)
+        {
+            ClientRect rect = clientSnapshot[i];
+            IntPtr piece = CreateRectRgn(rect.left + dx, rect.top + dy, rect.right + dx, rect.bottom + dy);
+            CombineRgn(region, region, piece, 2);
+            DeleteObject(piece);
+        }
+
+        return region;
     }
 
     static IntPtr StaticWndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
     {
         try
         {
+            if (msg == WmWindowPosChanging && instance != null && hWnd == instance.hwnd)
+                instance.ClampWindowPos(lParam);
+
             if (!dragging && msg == WmNcHitTest && instance != null)
             {
-                long packed = lParam.ToInt64();
-                int screenX = unchecked((short)(packed & 0xFFFF));
-                int screenY = unchecked((short)((packed >> 16) & 0xFFFF));
-                if (!instance.IsScreenPixelVisible(screenX, screenY))
+                if (!GetCursorPos(out NativePoint cursor) || !instance.IsScreenPixelVisible(cursor.x, cursor.y))
                     return new IntPtr(HtTransparent);
             }
         }
         catch (Exception)
         {
+            if (!dragging && msg == WmNcHitTest)
+                return new IntPtr(HtTransparent);
         }
 
-        if (prevProc == IntPtr.Zero)
+        if (!prevByHwnd.TryGetValue(hWnd, out IntPtr previous) || previous == IntPtr.Zero)
             return DefWindowProc(hWnd, msg, wParam, lParam);
-        return CallWindowProc(prevProc, hWnd, msg, wParam, lParam);
+        return CallWindowProc(previous, hWnd, msg, wParam, lParam);
+    }
+
+    void ClampWindowPos(IntPtr lParam)
+    {
+        var pos = Marshal.PtrToStructure<WindowPos>(lParam);
+        if ((pos.flags & SwpNoSize) != 0 && (pos.flags & SwpNoMove) != 0)
+            return;
+
+        IntPtr monitor = MonitorFromWindow(pos.hwnd != IntPtr.Zero ? pos.hwnd : hwnd, MonitorDefaultToNearest);
+        var info = new MonitorInfo { cbSize = Marshal.SizeOf(typeof(MonitorInfo)) };
+        if (monitor == IntPtr.Zero || !GetMonitorInfo(monitor, ref info))
+            return;
+
+        int x = pos.x;
+        int y = pos.y;
+        int width = pos.cx;
+        int height = pos.cy;
+        if ((pos.flags & SwpNoMove) != 0 || (pos.flags & SwpNoSize) != 0)
+        {
+            if (!GetWindowRect(pos.hwnd != IntPtr.Zero ? pos.hwnd : hwnd, out NativeRect current))
+                return;
+            if ((pos.flags & SwpNoMove) != 0)
+            {
+                x = current.left;
+                y = current.top;
+            }
+            if ((pos.flags & SwpNoSize) != 0)
+            {
+                width = current.right - current.left;
+                height = current.bottom - current.top;
+            }
+        }
+
+        int maxWidth = info.rcMonitor.right - info.rcMonitor.left - 1;
+        int maxHeight = info.rcMonitor.bottom - info.rcMonitor.top - 1;
+        if (maxWidth < 1 || maxHeight < 1)
+            return;
+
+        bool changed = false;
+        if (width > maxWidth)
+        {
+            width = maxWidth;
+            changed = true;
+        }
+        if (height > maxHeight)
+        {
+            height = maxHeight;
+            changed = true;
+        }
+        if (x <= info.rcMonitor.left && x + width >= info.rcMonitor.right)
+        {
+            width = Mathf.Min(width, maxWidth);
+            changed = true;
+        }
+        if (y <= info.rcMonitor.top && y + height >= info.rcMonitor.bottom)
+        {
+            height = Mathf.Min(height, maxHeight);
+            changed = true;
+        }
+        if (!changed)
+            return;
+
+        pos.flags &= ~SwpNoSize;
+        pos.cx = width;
+        pos.cy = height;
+        Marshal.StructureToPtr(pos, lParam, false);
     }
 
     static IntPtr ResolveWindow()
@@ -636,6 +1052,18 @@ public class DesktopPetWindow : MonoBehaviour
         public int cxRightWidth;
         public int cyTopHeight;
         public int cyBottomHeight;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct WindowPos
+    {
+        public IntPtr hwnd;
+        public IntPtr hwndInsertAfter;
+        public int x;
+        public int y;
+        public int cx;
+        public int cy;
+        public uint flags;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -691,6 +1119,9 @@ public class DesktopPetWindow : MonoBehaviour
     static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
     [DllImport("user32.dll")]
+    static extern int GetSystemMetrics(int nIndex);
+
+    [DllImport("user32.dll")]
     static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
 
     [DllImport("user32.dll")]
@@ -707,6 +1138,24 @@ public class DesktopPetWindow : MonoBehaviour
 
     [DllImport("user32.dll")]
     static extern bool GetWindowRect(IntPtr hWnd, out NativeRect lpRect);
+
+    [DllImport("user32.dll")]
+    static extern bool ClientToScreen(IntPtr hWnd, ref NativePoint lpPoint);
+
+    [DllImport("user32.dll")]
+    static extern bool EnumChildWindows(IntPtr hWndParent, EnumChildProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    static extern int SetWindowRgn(IntPtr hWnd, IntPtr hRgn, bool bRedraw);
+
+    [DllImport("gdi32.dll")]
+    static extern IntPtr CreateRectRgn(int left, int top, int right, int bottom);
+
+    [DllImport("gdi32.dll")]
+    static extern int CombineRgn(IntPtr dest, IntPtr src1, IntPtr src2, int mode);
+
+    [DllImport("gdi32.dll")]
+    static extern bool DeleteObject(IntPtr hObject);
 
     [DllImport("user32.dll")]
     static extern bool ReleaseCapture();

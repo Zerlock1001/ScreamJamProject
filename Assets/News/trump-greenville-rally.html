@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trump ties $5,000 checks to a Republican midterm win — The Harbor Ledger</title>
+  <style>
+    :root {
+      --ink: #1a1a1a;
+      --muted: #5c584f;
+      --rule: #1a1a1a;
+      --paper: #f7f4ee;
+      --accent: #8f1d1d;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: #e7e2d8;
+      color: var(--ink);
+      font-family: Georgia, "Iowan Old Style", "Palatino Linotype", Palatino, serif;
+    }
+
+    .page {
+      position: relative;
+      max-width: 820px;
+      margin: 28px auto 48px;
+      background: var(--paper);
+      padding: 28px 40px 56px;
+      box-shadow: 0 12px 40px rgba(40, 30, 20, 0.12);
+      overflow: hidden;
+    }
+
+    .page::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.22;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 640 360'%3E%3Cellipse cx='320' cy='180' rx='250' ry='130' fill='none' stroke='%23cfc6ba' stroke-width='10'/%3E%3Ccircle cx='320' cy='180' r='58' fill='none' stroke='%23cfc6ba' stroke-width='10'/%3E%3Ccircle cx='320' cy='180' r='22' fill='%23d5cdc3'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: center 46%;
+      background-size: 78% auto;
+    }
+
+    .page > * { position: relative; }
+
+    .eye {
+      width: 28px;
+      height: 18px;
+      margin: 8px auto 0;
+      display: block;
+    }
+
+    .seal {
+      margin: 4px 0 0;
+      font-family: "Segoe UI", Helvetica, Arial, sans-serif;
+      font-size: 9px;
+      letter-spacing: 0.28em;
+      text-transform: uppercase;
+      color: rgba(143, 29, 29, 0.55);
+    }
+
+    .masthead {
+      text-align: center;
+      border-top: 3px solid var(--rule);
+      border-bottom: 1px solid var(--rule);
+      padding: 10px 0 8px;
+    }
+
+    .masthead h1 {
+      margin: 0;
+      font-weight: 700;
+      font-size: 42px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      line-height: 1;
+    }
+
+    .masthead p {
+      margin: 6px 0 0;
+      font-family: "Segoe UI", Helvetica, Arial, sans-serif;
+      font-size: 11px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .tools {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      margin: 8px 0 0;
+      padding-bottom: 8px;
+      border-bottom: 3px solid var(--rule);
+      font-family: "Segoe UI", Helvetica, Arial, sans-serif;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .kicker {
+      margin: 22px 0 0;
+      color: var(--accent);
+      font-family: "Segoe UI", Helvetica, Arial, sans-serif;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    h2 {
+      margin: 8px 0 0;
+      font-size: 40px;
+      line-height: 1.08;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .deck {
+      margin: 12px 0 0;
+      font-size: 20px;
+      line-height: 1.35;
+      color: #333;
+    }
+
+    .byline {
+      margin: 16px 0 0;
+      font-family: "Segoe UI", Helvetica, Arial, sans-serif;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .byline strong { color: var(--ink); }
+
+    figure {
+      margin: 22px 0 0;
+    }
+
+    figure img {
+      display: block;
+      width: 100%;
+      max-height: 520px;
+      object-fit: cover;
+      object-position: center 18%;
+      background: #ddd;
+    }
+
+    figcaption {
+      margin-top: 8px;
+      font-family: "Segoe UI", Helvetica, Arial, sans-serif;
+      font-size: 12px;
+      line-height: 1.45;
+      color: var(--muted);
+    }
+
+    article p {
+      margin: 16px 0 0;
+      font-size: 18px;
+      line-height: 1.55;
+    }
+
+    article p:first-of-type::first-letter {
+      float: left;
+      font-size: 58px;
+      line-height: 0.8;
+      padding: 6px 8px 0 0;
+      font-weight: 700;
+    }
+
+    .related {
+      margin-top: 28px;
+      padding-top: 14px;
+      border-top: 1px solid #c8c2b6;
+      font-family: "Segoe UI", Helvetica, Arial, sans-serif;
+    }
+
+    .related h3 {
+      margin: 0;
+      font-size: 12px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    .related p {
+      margin: 8px 0 0;
+      font-size: 15px;
+      line-height: 1.45;
+      font-family: Georgia, "Iowan Old Style", Palatino, serif;
+    }
+
+    .classified {
+      margin-top: 26px;
+      padding: 12px 14px 14px;
+      border: 1px solid #c8c2b6;
+      background: rgba(255, 252, 246, 0.55);
+    }
+
+    .classified h3 {
+      margin: 0;
+      font-family: "Segoe UI", Helvetica, Arial, sans-serif;
+      font-size: 11px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    .classified .ad {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-top: 8px;
+    }
+
+    .classified strong {
+      display: block;
+      font-size: 18px;
+      letter-spacing: 0.08em;
+    }
+
+    .classified p {
+      margin: 2px 0 0;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+
+    .forecast {
+      margin-top: 14px;
+      font-family: "Segoe UI", Helvetica, Arial, sans-serif;
+      font-size: 12px;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+    }
+
+    footer {
+      margin-top: 28px;
+      font-family: "Segoe UI", Helvetica, Arial, sans-serif;
+      font-size: 11px;
+      line-height: 1.45;
+      color: var(--muted);
+    }
+
+    footer .motto {
+      display: block;
+      margin-top: 8px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      font-size: 9px;
+      color: rgba(143, 29, 29, 0.7);
+    }
+
+    @media (max-width: 640px) {
+      .page { margin: 0; padding: 18px 16px 36px; }
+      .masthead h1 { font-size: 28px; }
+      h2 { font-size: 30px; }
+      .tools { flex-direction: column; gap: 4px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <!-- Oculus Omnis. The first friend paid because he was afraid. Blinky is the door. -->
+    <header class="masthead">
+      <h1>The Harbor Ledger</h1>
+      <svg class="eye" viewBox="0 0 64 36" aria-hidden="true">
+        <ellipse cx="32" cy="18" rx="28" ry="14" fill="none" stroke="#8f1d1d" stroke-width="1.4"/>
+        <circle cx="32" cy="18" r="6" fill="none" stroke="#1a1a1a" stroke-width="1.4"/>
+        <circle cx="32" cy="18" r="2.4" fill="#8f1d1d"/>
+      </svg>
+      <p class="seal">Oculus Omnis</p>
+      <p>Politics · Washington and the campaign trail</p>
+    </header>
+    <div class="tools">
+      <span>Wednesday, October 21, 2026</span>
+      <span>Midterms</span>
+    </div>
+
+    <p class="kicker">Campaign</p>
+    <h2>Trump ties $5,000 checks and other benefits to a Republican midterm win</h2>
+    <p class="deck">At a rally in Greenville, North Carolina, the president said a new round of promises would reach Americans only if his party keeps Congress.</p>
+    <p class="byline"><strong>By the Harbor Ledger staff</strong> · Updated 9:40 a.m. ET</p>
+
+    <figure>
+      <img src="trump-official-portrait.jpg" alt="Official portrait of President Donald J. Trump">
+      <figcaption>President Donald J. Trump. Official White House photograph by Daniel Torok, June 2025. U.S. government work, public domain. The portrait is not from the Greenville rally.</figcaption>
+    </figure>
+
+    <article>
+      <p>GREENVILLE, N.C. — President Donald Trump used a Tuesday rally at Pitt–Greenville Airport to tell supporters that a fresh set of federal benefits would depend on Republicans holding Congress in November.</p>
+      <p>The promise drawing the most notice is a payment of more than $5,000. On the road this week he has put the same condition on other offers. In Kansas, while campaigning for Senator Roger Marshall, he said summer limits on fuel blended with 15 percent ethanol would be lifted. In Kentucky he spoke of a $100 million investment in a pharmaceutical plant. In Ohio he said he would look “very strongly” at the state for a Space Force academy. Each, as he has framed it, waits on his preferred Republicans winning and on the party keeping control of Congress.</p>
+      <p>Democrats say the president is using the power of the office as a campaign reward, and as a warning. Doubt about the checks is wider than that argument. An NBC News Decision Desk poll found that 14 percent of U.S. adults expect to receive the $5,000 payment Trump has described. Among people who call themselves Republicans, 47 percent said they do not expect a check.</p>
+      <p>The Greenville stop, on October 20, was one piece of a late tour before the November 3 midterms. Trump has been asking voters to treat a Democratic Congress as the thing that would cancel what he has been calling “goodies” from the stage.</p>
+      <p>No bill, payment date, or agency plan for the checks has been published. Until that paperwork exists, the figure remains a pledge made on the trail, not a benefit people can apply for.</p>
+    </article>
+
+    <aside class="related">
+      <h3>Also this week</h3>
+      <p>On October 19 the Agriculture Department said it would make $8 billion available in one-time harvest payments to farmers, citing market disruptions and higher costs for fuel and other inputs.</p>
+    </aside>
+
+    <aside class="classified">
+      <h3>Notices</h3>
+      <div class="ad">
+        <svg class="eye" viewBox="0 0 64 36" aria-hidden="true">
+          <ellipse cx="32" cy="18" rx="28" ry="14" fill="none" stroke="#8f1d1d" stroke-width="1.6"/>
+          <circle cx="32" cy="18" r="6" fill="none" stroke="#1a1a1a" stroke-width="1.6"/>
+          <circle cx="32" cy="18" r="2.4" fill="#8f1d1d"/>
+        </svg>
+        <div>
+          <strong>BLINKY</strong>
+          <p>A little eye for your desktop. Curious where your friends are, and who they talk to? It already is. Free to look. The seeing comes after.</p>
+        </div>
+      </div>
+      <p class="forecast">Tomorrow is already written. Those who watch are kept. The offering is monthly.</p>
+    </aside>
+
+    <footer>
+      This page is an original summary of public reporting, including Associated Press coverage of the October 20 rally in Greenville and NBC News reporting on the campaign promises and its Decision Desk poll. It is not a page from those newsrooms. The photograph is an official White House portrait, not a picture from the event.
+      <span class="motto">Qui videt, videtur</span>
+    </footer>
+  </main>
+</body>
+</html>
