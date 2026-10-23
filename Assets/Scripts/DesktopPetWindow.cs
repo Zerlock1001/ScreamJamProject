@@ -290,13 +290,17 @@ public class DesktopPetWindow : MonoBehaviour
             return;
 
         Vector3 position = petDragTarget.position;
+        Vector3 visualCenter = PetJourney.Instance != null
+            ? PetJourney.Instance.PetVisualCenter
+            : position;
         float halfHeight = Mathf.Max(0.01f, cam.orthographicSize);
         float halfWidth = halfHeight * Mathf.Max(0.01f, cam.aspect);
         Vector3 center = cam.transform.position;
         const float margin = 1.2f;
-        position.x = Mathf.Clamp(position.x, center.x - halfWidth + margin, center.x + halfWidth - margin);
-        position.y = Mathf.Clamp(position.y, center.y - halfHeight + margin, center.y + halfHeight - margin);
-        petDragTarget.position = position;
+        Vector3 clampedVisual = visualCenter;
+        clampedVisual.x = Mathf.Clamp(visualCenter.x, center.x - halfWidth + margin, center.x + halfWidth - margin);
+        clampedVisual.y = Mathf.Clamp(visualCenter.y, center.y - halfHeight + margin, center.y + halfHeight - margin);
+        petDragTarget.position = position + (clampedVisual - visualCenter);
     }
 #endif
 

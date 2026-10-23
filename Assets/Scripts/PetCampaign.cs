@@ -215,6 +215,8 @@ public class PetCampaign : MonoBehaviour
         }
 
         SaveFlags();
+        if (awaitingAgree && !cultJoined)
+            DailyMiniGame.RestorePendingPassword();
     }
 
     void SaveFlags()

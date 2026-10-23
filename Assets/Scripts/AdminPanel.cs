@@ -15,6 +15,7 @@ public class AdminPanel : MonoBehaviour
 {
     const string AdminName = "OcOm_Admin123";
     const string AdminRole = "ADMINISTRATOR // ROOT";
+    const string ColorSequenceKey = "AdminPanel.ColorSequence";
 
     static readonly Color PanelColor = new Color(0.035f, 0.035f, 0.04f, 0.98f);
     static readonly Color PanelDark = new Color(0.012f, 0.012f, 0.015f, 1f);
@@ -88,6 +89,13 @@ public class AdminPanel : MonoBehaviour
     {
         if (instance != null)
             instance.Hide();
+    }
+
+    public static void ClearCachedSequence()
+    {
+        sharedColorSequence = null;
+        if (instance != null)
+            instance.colorSequence = null;
     }
 
     public static void SetIdentity(Sprite avatar, string username, string role = null)
@@ -229,6 +237,9 @@ public class AdminPanel : MonoBehaviour
             colorSequence = null;
         else if (colorSequence == null)
         {
+            if (sharedColorSequence == null || sharedColorSequence.Length == 0)
+                LoadSharedColorSequence();
+
             if (sharedColorSequence != null && sharedColorSequence.Length > 0)
                 colorSequence = sharedColorSequence;
             else
@@ -290,11 +301,14 @@ public class AdminPanel : MonoBehaviour
         int[] sequence = instance != null ? instance.colorSequence : null;
         if (sequence == null || sequence.Length == 0)
             sequence = sharedColorSequence;
+        if (sequence == null || sequence.Length == 0)
+            sequence = LoadSharedColorSequence();
 
         if (sequence == null || sequence.Length == 0)
         {
             sequence = CreateColorSequence();
             sharedColorSequence = sequence;
+            SaveSharedColorSequence();
             if (instance != null)
                 instance.colorSequence = sequence;
         }
@@ -310,6 +324,38 @@ public class AdminPanel : MonoBehaviour
     {
         colorSequence = CreateColorSequence();
         sharedColorSequence = colorSequence;
+        SaveSharedColorSequence();
+    }
+
+    static int[] LoadSharedColorSequence()
+    {
+        string saved = PlayerPrefs.GetString(ColorSequenceKey, string.Empty);
+        if (string.IsNullOrEmpty(saved) || saved.Length != 6)
+            return null;
+
+        var sequence = new int[6];
+        for (int i = 0; i < saved.Length; i++)
+        {
+            if (saved[i] < '1' || saved[i] > '3')
+                return null;
+            sequence[i] = saved[i] - '0';
+        }
+
+        sharedColorSequence = sequence;
+        return sequence;
+    }
+
+    static void SaveSharedColorSequence()
+    {
+        if (sharedColorSequence == null || sharedColorSequence.Length != 6)
+            return;
+
+        var saved = new char[6];
+        for (int i = 0; i < sharedColorSequence.Length; i++)
+            saved[i] = (char)('0' + Mathf.Clamp(sharedColorSequence[i], 1, 3));
+
+        PlayerPrefs.SetString(ColorSequenceKey, new string(saved));
+        PlayerPrefs.Save();
     }
 
     static int[] CreateColorSequence()
