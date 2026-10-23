@@ -444,8 +444,11 @@ public class AdminPanel : MonoBehaviour
                     ? "<color=#2f8f57>[SUCCESS]</color> ACCESS GRANTED / " +
                       "<color=#2f8f57>WELCOME USER ADMIN_OcOm!</color>"
                     : "<color=#a33d3d>[WARN]</color> ACCESS DENIED");
-            StartCoroutine(ScrollTerminalToBottom());
+            yield return ScrollTerminalToBottom();
         }
+
+        if (!accepted)
+            yield return new WaitForSecondsRealtime(0.55f);
 
         verifying = false;
         verifyRoutine = null;
@@ -455,6 +458,8 @@ public class AdminPanel : MonoBehaviour
 
         if (accepted)
             PetCampaign.TryAgree();
+        else
+            PetCampaign.SayWrongPasswordHint();
     }
 
     static float EaseOutBack(float t)

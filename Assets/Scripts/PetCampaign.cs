@@ -108,6 +108,7 @@ public class PetCampaign : MonoBehaviour
     bool armAgree;
     bool cultJoined;
     bool cultJoining;
+    int wrongPasswordHints;
     int secondAsks;
     bool retract;
     int feeds;
@@ -407,6 +408,22 @@ public class PetCampaign : MonoBehaviour
         if (PetJourney.Instance != null)
             PetJourney.Instance.RecoverMood();
         DebugConsole.WriteLine("Agreed.");
+    }
+
+    public static void SayWrongPasswordHint()
+    {
+        PetCampaign campaign = Ensure();
+        if (campaign == null)
+            return;
+
+        string[] hints =
+        {
+            "We use ColSum Code System to design the passcode.",
+            "The numbers of the numbers might matter."
+        };
+        int index = campaign.wrongPasswordHints % hints.Length;
+        campaign.wrongPasswordHints++;
+        PetDialogue.Say(hints[index]);
     }
 
     public void OnTripStarted(int trip, float duration)
@@ -1255,8 +1272,7 @@ public class PetCampaign : MonoBehaviour
         }
 
         AdminPanel.Close();
-        var host = new GameObject("CultMosaic");
-        host.AddComponent<CultMosaicPlayer>().Play(this, early);
+        SuperCoolEffect.Trigger(() => CompleteJoin(early));
     }
 
     public void CompleteJoin(bool early)
@@ -1601,69 +1617,5 @@ public class PetCampaign : MonoBehaviour
         if (font == null)
             font = Resources.GetBuiltinResource<Font>("Arial.ttf");
         return font;
-    }
-}
-
-public class CultMosaicPlayer : MonoBehaviour
-{
-    public void Play(PetCampaign campaign, bool early)
-    {
-        StartCoroutine(Run(campaign, early));
-    }
-
-    IEnumerator Run(PetCampaign campaign, bool early)
-    {
-        const int cells = 24;
-        var texture = new Texture2D(cells, cells, TextureFormat.RGBA32, false);
-        texture.filterMode = FilterMode.Point;
-        texture.wrapMode = TextureWrapMode.Clamp;
-        texture.hideFlags = HideFlags.HideAndDontSave;
-        var pixels = new Color32[cells * cells];
-        var rng = new System.Random();
-
-        var canvasObject = new GameObject("CultMosaicCanvas", typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
-        var canvas = canvasObject.GetComponent<Canvas>();
-        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-        canvas.sortingOrder = 31500;
-        var scaler = canvasObject.GetComponent<CanvasScaler>();
-        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(1920f, 1080f);
-
-        var imageObject = new GameObject("Blocks", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
-        imageObject.transform.SetParent(canvasObject.transform, false);
-        var rect = imageObject.GetComponent<RectTransform>();
-        rect.anchorMin = Vector2.zero;
-        rect.anchorMax = Vector2.one;
-        rect.offsetMin = Vector2.zero;
-        rect.offsetMax = Vector2.zero;
-        var image = imageObject.GetComponent<Image>();
-        var sprite = Sprite.Create(texture, new Rect(0f, 0f, cells, cells), new Vector2(0.5f, 0.5f), 100f);
-        sprite.hideFlags = HideFlags.HideAndDontSave;
-        image.sprite = sprite;
-        image.preserveAspect = false;
-        image.raycastTarget = true;
-
-        float elapsed = 0f;
-        while (elapsed < 3f)
-        {
-            for (int i = 0; i < pixels.Length; i++)
-            {
-                byte v = (byte)rng.Next(16, 220);
-                pixels[i] = new Color32(v, v, v, 255);
-            }
-
-            texture.SetPixels32(pixels);
-            texture.Apply(false);
-            yield return new WaitForSecondsRealtime(0.12f);
-            elapsed += 0.12f;
-        }
-
-        if (campaign != null)
-            campaign.CompleteJoin(early);
-
-        Destroy(canvasObject);
-        Destroy(sprite);
-        Destroy(texture);
-        Destroy(gameObject);
     }
 }

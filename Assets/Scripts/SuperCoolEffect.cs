@@ -32,6 +32,7 @@ public class SuperCoolEffect : MonoBehaviour
     const float GridRampSeconds = 1.5f + 2f + 1f + 3f;
 
     static SuperCoolEffect instance;
+    Action onFinished;
 
     static readonly string[] TerminalLines =
     {
@@ -128,8 +129,17 @@ public class SuperCoolEffect : MonoBehaviour
 
     public static void Trigger()
     {
+        Trigger(null);
+    }
+
+    public static void Trigger(Action finished)
+    {
         if (instance != null && instance.running)
+        {
+            if (finished != null)
+                instance.onFinished += finished;
             return;
+        }
 
         if (instance == null)
         {
@@ -137,6 +147,7 @@ public class SuperCoolEffect : MonoBehaviour
             instance = host.AddComponent<SuperCoolEffect>();
         }
 
+        instance.onFinished = finished;
         instance.Begin();
     }
 
@@ -706,9 +717,13 @@ public class SuperCoolEffect : MonoBehaviour
         PetJourney.SetMoodBarVisible(true);
         RestorePhoneIcon();
 
+        Action done = onFinished;
+        onFinished = null;
         if (instance == this)
             instance = null;
         Destroy(gameObject);
+        if (done != null)
+            done();
     }
 
     void OnDestroy()
