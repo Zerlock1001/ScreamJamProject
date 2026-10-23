@@ -28,7 +28,7 @@ public class AdminPanel : MonoBehaviour
         "<color=#2f8f57>[SUCCESS]</color> SECURE CHANNEL ESTABLISHED",
         "<color=#a33d3d>[WARN]</color> COULD NOT VERIFY IDENTITY",
         "<color=#a33d3d>[WARN]</color> SESSION TRUST IS LIMITED",
-        "<color=#e6e6e8>//ENTER ADMIN PASSWORD:</color>"
+        "<color=#e6e6e8>//: ENTER ADMIN PASSWORD</color>"
     };
 
     static AdminPanel instance;
@@ -390,12 +390,12 @@ public class AdminPanel : MonoBehaviour
             TextAnchor.UpperLeft,
             TextColor);
         terminalText.supportRichText = true;
-        terminalText.lineSpacing = 1.25f;
+        terminalText.lineSpacing = 1.4375f;
         var terminalTextRect = terminalText.rectTransform;
         terminalTextRect.anchorMin = Vector2.zero;
         terminalTextRect.anchorMax = Vector2.one;
-        terminalTextRect.offsetMin = new Vector2(14f, 52f);
-        terminalTextRect.offsetMax = new Vector2(-14f, -12f);
+        terminalTextRect.offsetMin = new Vector2(20f, 52f);
+        terminalTextRect.offsetMax = new Vector2(-20f, -12f);
         terminalText.raycastTarget = false;
 
         var passwordObject = new GameObject("Password", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(InputField), typeof(Outline));
@@ -404,8 +404,8 @@ public class AdminPanel : MonoBehaviour
         passwordRect.anchorMin = new Vector2(0f, 0f);
         passwordRect.anchorMax = new Vector2(1f, 0f);
         passwordRect.pivot = new Vector2(0.5f, 0f);
-        passwordRect.offsetMin = new Vector2(14f, 12f);
-        passwordRect.offsetMax = new Vector2(-14f, 44f);
+        passwordRect.offsetMin = new Vector2(20f, 12f);
+        passwordRect.offsetMax = new Vector2(-20f, 44f);
 
         var passwordImage = passwordObject.GetComponent<Image>();
         passwordImage.color = new Color(0.008f, 0.008f, 0.01f, 1f);
