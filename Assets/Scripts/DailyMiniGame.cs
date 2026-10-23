@@ -285,7 +285,7 @@ public class DailyMiniGame : MonoBehaviour
         flagCounter.anchorMin = new Vector2(1f, 0.5f);
         flagCounter.anchorMax = new Vector2(1f, 0.5f);
         flagCounter.pivot = new Vector2(1f, 0.5f);
-        flagCounter.anchoredPosition = new Vector2(-38f, 0f);
+        flagCounter.anchoredPosition = new Vector2(-10f, 0f);
         flagCounter.sizeDelta = new Vector2(58f, 34f);
         var flagOutline = flagCounter.gameObject.AddComponent<Outline>();
         flagOutline.effectColor = new Color(0.34f, 0.34f, 0.35f, 1f);
@@ -319,13 +319,13 @@ public class DailyMiniGame : MonoBehaviour
         statusSmileyImage.preserveAspect = true;
         statusSmileyImage.raycastTarget = false;
 
-        var closeButton = MakeButton("Close", statusBar, new Color(0.84f, 0.84f, 0.85f, 1f), "X", 14);
+        var closeButton = MakeButton("Close", window.transform, new Color(0.84f, 0.84f, 0.85f, 1f), "X", 14);
         var closeRect = closeButton.GetComponent<RectTransform>();
-        closeRect.anchorMin = new Vector2(1f, 0.5f);
-        closeRect.anchorMax = new Vector2(1f, 0.5f);
-        closeRect.pivot = new Vector2(1f, 0.5f);
-        closeRect.anchoredPosition = new Vector2(-5f, 0f);
-        closeRect.sizeDelta = new Vector2(22f, 22f);
+        closeRect.anchorMin = new Vector2(1f, 1f);
+        closeRect.anchorMax = new Vector2(1f, 1f);
+        closeRect.pivot = new Vector2(1f, 1f);
+        closeRect.anchoredPosition = new Vector2(-12f, -12f);
+        closeRect.sizeDelta = new Vector2(24f, 24f);
         closeButton.onClick.AddListener(CloseWindow);
 
         var gridObject = new GameObject("Grid", typeof(RectTransform), typeof(Image), typeof(GridLayoutGroup));

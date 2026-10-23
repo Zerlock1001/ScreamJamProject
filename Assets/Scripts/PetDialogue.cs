@@ -81,6 +81,7 @@ public class PetDialogue : MonoBehaviour
 
     public static string PlayerName { get; private set; }
     public static bool HasPlayerName => !string.IsNullOrEmpty(PlayerName);
+    public static bool OpeningComplete { get; private set; }
     public bool IsOpen => visible;
     public Transform PetRoot => petRoot;
     public bool CanDragPet => petRoot != null && !namePromptBusy && !PetJourney.PetIsAway;
@@ -193,6 +194,7 @@ public class PetDialogue : MonoBehaviour
     void Awake()
     {
         Instance = this;
+        OpeningComplete = false;
         EnsurePetRoot();
         if (speaker == null)
             speaker = GetComponent<SpriteRenderer>();
@@ -232,7 +234,10 @@ public class PetDialogue : MonoBehaviour
             Destroy(namePrompt);
 
         if (Instance == this)
+        {
             Instance = null;
+            OpeningComplete = false;
+        }
     }
 
     bool resumeAfterName;
@@ -352,6 +357,10 @@ public class PetDialogue : MonoBehaviour
 
         if (!HasPlayerName)
             yield break;
+
+        OpeningComplete = atCorner
+            || openingBeat == OpeningBeat.None
+            || openingBeat == OpeningBeat.Welcome;
 
         if (openingBeat == OpeningBeat.AskName)
             SetOpening(OpeningBeat.Greet);
@@ -728,6 +737,7 @@ public class PetDialogue : MonoBehaviour
             && PetJourney.Instance.CompletedTrips >= 1;
         if (continued)
         {
+            OpeningComplete = true;
             PetCampaign campaign = PetCampaign.Ensure();
             if (!campaign.HasIntroduced && !PetJourney.PetIsAway)
                 campaign.BeginAfterFirstReturn();
@@ -1113,6 +1123,7 @@ public class PetDialogue : MonoBehaviour
     IEnumerator MoveToCorner()
     {
         yield return StartCoroutine(PlayClipAndWait("Enter"));
+        OpeningComplete = true;
         SetOpening(OpeningBeat.Stay);
         Show("I think I'll just stay here.");
     }

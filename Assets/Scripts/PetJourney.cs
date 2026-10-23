@@ -1742,9 +1742,26 @@ public class PetJourney : MonoBehaviour
         moodWidget.anchorMin = new Vector2(0.5f, 0.5f);
         moodWidget.anchorMax = new Vector2(0.5f, 0.5f);
         moodWidget.pivot = new Vector2(0.5f, 1f);
-        moodWidget.gameObject.SetActive(true);
+        AddMoodBarBorder();
+        moodWidget.gameObject.SetActive(false);
         RefreshMoodBar();
         PlaceMoodWidget();
+    }
+
+    void AddMoodBarBorder()
+    {
+        if (moodWidget == null)
+            return;
+
+        Transform track = moodWidget.Find("MoodTrack");
+        if (track == null || track.GetComponent<Image>() == null)
+            return;
+
+        var outline = track.GetComponent<Outline>();
+        if (outline == null)
+            outline = track.gameObject.AddComponent<Outline>();
+        outline.effectColor = new Color(0.07f, 0.07f, 0.08f, 1f);
+        outline.effectDistance = new Vector2(1.5f, -1.5f);
     }
 
     void PlaceMoodWidget()
@@ -1760,7 +1777,11 @@ public class PetJourney : MonoBehaviour
         if (moodWidget == null)
             return;
 
-        bool visible = pet != null && pet.enabled && pet.gameObject.activeInHierarchy;
+        bool openingReady = PetDialogue.Instance != null && PetDialogue.OpeningComplete;
+        bool visible = openingReady
+            && pet != null
+            && pet.enabled
+            && pet.gameObject.activeInHierarchy;
         if (!visible)
         {
             if (moodWidget.gameObject.activeSelf)

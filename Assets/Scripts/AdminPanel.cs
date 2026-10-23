@@ -2,7 +2,6 @@ using System;
 using System.Collections;
 using System.Net;
 using System.Net.Sockets;
-using ScreamJam.Debugging;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -354,7 +353,8 @@ public class AdminPanel : MonoBehaviour
         {
             terminalText.text = prefix + "VERIFYING...\n" +
                 (accepted
-                    ? "<color=#2f8f57>[SUCCESS]</color> ACCESS GRANTED"
+                    ? "<color=#2f8f57>[SUCCESS]</color> ACCESS GRANTED / " +
+                      "<color=#2f8f57>WELCOME USER ADMIN_OcOm!</color>"
                     : "<color=#a33d3d>[WARN]</color> ACCESS DENIED");
         }
 
@@ -363,20 +363,6 @@ public class AdminPanel : MonoBehaviour
         accessGranted = accepted;
         if (!accepted && passwordInput != null)
             passwordInput.ActivateInputField();
-
-        if (accepted)
-            StartCoroutine(OpenConsoleAfterGrant());
-    }
-
-    IEnumerator OpenConsoleAfterGrant()
-    {
-        yield return new WaitForSecondsRealtime(0.9f);
-        Hide();
-        yield return new WaitForSecondsRealtime(0.2f);
-        DebugConsole.OpenConsole();
-        DebugConsole.WriteLine("Access granted");
-        yield return new WaitForSecondsRealtime(0.5f);
-        DebugConsole.WriteLine("Welcome user admin_OcOm!");
     }
 
     static float EaseOutBack(float t)

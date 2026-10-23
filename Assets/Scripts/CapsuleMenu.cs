@@ -11,11 +11,12 @@ public class CapsuleMenu : MonoBehaviour
 {
     [SerializeField] bool enableMenu = true;
     [SerializeField] float clickSlopPixels = 12f;
-    [SerializeField] float menuGap = 0.25f;
+    [SerializeField] float menuGap = 0.10f;
     [SerializeField] float hoverScale = 1.18f;
 
     const float PanelWidth = 2.2f;
     const float PanelHeight = 1.2f;
+    const float MenuScale = 1.2f;
     const float OptionRowY = 0.3f;
     const int GlyphWidth = 5;
     const int GlyphHeight = 7;
@@ -161,6 +162,7 @@ public class CapsuleMenu : MonoBehaviour
     {
         panelObject = new GameObject("CapsuleMenuPanel");
         panelObject.transform.SetParent(transform, false);
+        panelObject.transform.localScale = Vector3.one * MenuScale;
 
         panelRenderer = panelObject.AddComponent<SpriteRenderer>();
         panelSprite = CreatePanelSprite();
@@ -402,14 +404,18 @@ public class CapsuleMenu : MonoBehaviour
             return;
 
         Bounds bounds = capsule.bounds;
-        float x = bounds.min.x - menuGap - PanelWidth * 0.5f;
+        float menuWorldScale = Mathf.Abs(panelObject.transform.lossyScale.x);
+        float menuHalfWidth = PanelWidth * 0.5f * menuWorldScale;
+        if (menuHalfWidth < 0.001f)
+            menuHalfWidth = PanelWidth * 0.5f * MenuScale;
+        float x = bounds.min.x - menuGap - menuHalfWidth;
 
         if (cam != null && cam.orthographic)
         {
             float halfWidth = cam.orthographicSize * Mathf.Max(0.01f, cam.aspect);
             float leftLimit = cam.transform.position.x - halfWidth + 0.05f;
-            if (x - PanelWidth * 0.5f < leftLimit)
-                x = bounds.max.x + menuGap + PanelWidth * 0.5f;
+            if (x - menuHalfWidth < leftLimit)
+                x = bounds.max.x + menuGap + menuHalfWidth;
         }
 
         panelObject.transform.position = new Vector3(x, bounds.center.y, bounds.center.z);

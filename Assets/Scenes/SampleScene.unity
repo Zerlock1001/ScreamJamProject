@@ -2434,7 +2434,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   enableMenu: 1
   clickSlopPixels: 12
-  menuGap: 0.25
+  menuGap: 0.1
   hoverScale: 1.18
 --- !u!114 &1877028154
 MonoBehaviour:
