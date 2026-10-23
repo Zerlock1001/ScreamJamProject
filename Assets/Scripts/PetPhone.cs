@@ -5,7 +5,7 @@ using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 /// <summary>
-/// 手机：可拖动的聊天窗口。点图片会打开可拖动的查看窗，可以同时开多张。
+/// 手机：可拖动的聊天窗口。点图片只打开这张图，右上角的 X 用来关闭。
 /// </summary>
 public class PetPhone : MonoBehaviour
 {
@@ -79,6 +79,13 @@ public class PetPhone : MonoBehaviour
     {
         if (Instance == this)
             Instance = null;
+    }
+
+    public static void ShowPicture(Sprite picture)
+    {
+        Ensure();
+        if (Instance != null)
+            Instance.OpenPicture(picture);
     }
 
     public static void ShowButton()
@@ -158,6 +165,15 @@ public class PetPhone : MonoBehaviour
             return true;
         var canvas = go.GetComponent<Canvas>();
         return canvas != null && canvas.sortingOrder >= 32000;
+    }
+
+    public void Reveal()
+    {
+        if (phoneOpen && visual != null && visual.activeSelf)
+            return;
+
+        phoneOpen = false;
+        SetOpen(true);
     }
 
     public void SetOpen(bool open)
@@ -365,6 +381,99 @@ public class PetPhone : MonoBehaviour
         StartCoroutine(ScrollToBottom());
     }
 
+    public void AddLinkMessage(string text, string linkLabel, string url)
+    {
+        ActivateHost();
+        if (chatContent == null || string.IsNullOrEmpty(text))
+            return;
+
+        float textWidth = BubbleWidth - BubblePadX * 2f;
+        var measure = CreateText("Measure", transform, text, MessageFontSize, TextAnchor.UpperLeft, Color.black);
+        float textHeight = PreferredTextHeight(measure, textWidth);
+        measure.text = string.IsNullOrEmpty(linkLabel) ? " " : linkLabel;
+        float linkHeight = PreferredTextHeight(measure, textWidth);
+        DestroyImmediate(measure.gameObject);
+
+        float bubbleHeight = BubblePadY + textHeight + 4f + linkHeight + 2f + BubblePadY;
+        RectTransform row = BeginChatRow("MessageRow", BubbleWidth, bubbleHeight);
+        var bubble = new GameObject("Message", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(VerticalLayoutGroup), typeof(ContentSizeFitter), typeof(LayoutElement));
+        bubble.transform.SetParent(row, false);
+        var image = bubble.GetComponent<Image>();
+        image.sprite = Skin();
+        image.type = Image.Type.Simple;
+        image.color = new Color(0.86f, 0.88f, 0.9f, 1f);
+        image.raycastTarget = false;
+        var stack = bubble.GetComponent<VerticalLayoutGroup>();
+        stack.padding = new RectOffset((int)BubblePadX, (int)BubblePadX, (int)BubblePadY, (int)BubblePadY);
+        stack.spacing = 4f;
+        stack.childAlignment = TextAnchor.UpperLeft;
+        stack.childControlWidth = true;
+        stack.childControlHeight = true;
+        stack.childForceExpandWidth = true;
+        stack.childForceExpandHeight = false;
+        var fitter = bubble.GetComponent<ContentSizeFitter>();
+        fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+        fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        var bubbleLayout = bubble.GetComponent<LayoutElement>();
+        bubbleLayout.preferredWidth = BubbleWidth;
+        bubbleLayout.minWidth = BubbleWidth;
+        bubbleLayout.preferredHeight = bubbleHeight;
+
+        var body = CreateText("Label", bubble.transform, text, MessageFontSize, TextAnchor.UpperLeft, new Color(0.16f, 0.16f, 0.18f, 1f));
+        body.horizontalOverflow = HorizontalWrapMode.Wrap;
+        body.verticalOverflow = VerticalWrapMode.Overflow;
+        var bodyLayout = body.gameObject.AddComponent<LayoutElement>();
+        bodyLayout.preferredWidth = textWidth;
+        bodyLayout.preferredHeight = textHeight;
+
+        var linkBlue = new Color(0f, 0f, 0.933f, 1f);
+        var linkBlock = new GameObject("LinkBlock", typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(LayoutElement));
+        linkBlock.transform.SetParent(bubble.transform, false);
+        var linkStack = linkBlock.GetComponent<VerticalLayoutGroup>();
+        linkStack.spacing = 1f;
+        linkStack.childAlignment = TextAnchor.UpperLeft;
+        linkStack.childControlWidth = true;
+        linkStack.childControlHeight = true;
+        linkStack.childForceExpandWidth = false;
+        linkStack.childForceExpandHeight = false;
+        var linkBlockLayout = linkBlock.GetComponent<LayoutElement>();
+        linkBlockLayout.preferredWidth = textWidth;
+        linkBlockLayout.preferredHeight = linkHeight + 2f;
+
+        var link = CreateText("Link", linkBlock.transform, linkLabel, MessageFontSize, TextAnchor.UpperLeft, linkBlue);
+        link.horizontalOverflow = HorizontalWrapMode.Wrap;
+        link.verticalOverflow = VerticalWrapMode.Overflow;
+        link.raycastTarget = true;
+        float linkWidth = PreferredTextWidth(link, textWidth);
+        var linkLayout = link.gameObject.AddComponent<LayoutElement>();
+        linkLayout.preferredWidth = Mathf.Min(textWidth, linkWidth);
+        linkLayout.preferredHeight = linkHeight;
+
+        var lineObject = new GameObject("Underline", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(LayoutElement));
+        lineObject.transform.SetParent(linkBlock.transform, false);
+        var line = lineObject.GetComponent<Image>();
+        line.sprite = Skin();
+        line.type = Image.Type.Simple;
+        line.color = linkBlue;
+        line.raycastTarget = true;
+        var lineLayout = lineObject.GetComponent<LayoutElement>();
+        lineLayout.preferredWidth = Mathf.Min(textWidth, linkWidth);
+        lineLayout.preferredHeight = 1f;
+        lineLayout.minHeight = 1f;
+
+        var button = linkBlock.AddComponent<Button>();
+        button.targetGraphic = link;
+        button.transition = Selectable.Transition.None;
+        string open = url;
+        button.onClick.AddListener(() =>
+        {
+            if (!string.IsNullOrEmpty(open))
+                Application.OpenURL(open);
+        });
+
+        StartCoroutine(ScrollToBottom());
+    }
+
     public void RemoveLastPostcard()
     {
         if (chatContent == null)
@@ -435,11 +544,18 @@ public class PetPhone : MonoBehaviour
         var captionText = captionObject.GetComponent<Text>();
         captionText.font = BuiltinFont();
         captionText.fontSize = 14;
-        captionText.alignment = TextAnchor.MiddleLeft;
+        captionText.alignment = TextAnchor.UpperLeft;
+        captionText.horizontalOverflow = HorizontalWrapMode.Wrap;
+        captionText.verticalOverflow = VerticalWrapMode.Overflow;
         captionText.color = new Color(0.2f, 0.2f, 0.22f, 1f);
         captionText.raycastTarget = false;
         captionText.text = string.IsNullOrEmpty(caption) ? "Postcard" : caption;
-        captionObject.GetComponent<LayoutElement>().preferredHeight = 22f;
+        float captionWidth = cardWidth - layout.padding.left - layout.padding.right;
+        float captionHeight = Mathf.Max(20f, PreferredTextHeight(captionText, captionWidth) + 4f);
+        var captionLayout = captionObject.GetComponent<LayoutElement>();
+        captionLayout.preferredWidth = captionWidth;
+        captionLayout.preferredHeight = captionHeight;
+        captionLayout.minHeight = captionHeight;
 
         StartCoroutine(ScrollToBottom());
     }
@@ -451,6 +567,15 @@ public class PetPhone : MonoBehaviour
         settings.verticalOverflow = VerticalWrapMode.Overflow;
         float unit = label.pixelsPerUnit > 0f ? label.pixelsPerUnit : 1f;
         return label.cachedTextGeneratorForLayout.GetPreferredHeight(label.text, settings) / unit;
+    }
+
+    static float PreferredTextWidth(Text label, float width)
+    {
+        TextGenerationSettings settings = label.GetGenerationSettings(new Vector2(width, 10000f));
+        settings.horizontalOverflow = HorizontalWrapMode.Wrap;
+        settings.verticalOverflow = VerticalWrapMode.Overflow;
+        float unit = label.pixelsPerUnit > 0f ? label.pixelsPerUnit : 1f;
+        return label.cachedTextGeneratorForLayout.GetPreferredWidth(label.text, settings) / unit;
     }
 
     RectTransform BeginChatRow(string name, float bodyWidth, float bodyHeight)
@@ -970,37 +1095,28 @@ public class PetPhone : MonoBehaviour
 
         Canvas canvas = GetComponentInParent<Canvas>();
         if (canvas == null)
+            canvas = PetDialogue.OverlayCanvas();
+        if (canvas == null)
             return;
 
+        float width = Mathf.Max(1f, picture.rect.width);
+        float height = Mathf.Max(1f, picture.rect.height);
+        float scale = 480f / Mathf.Max(width, height);
         var windowObject = new GameObject("PictureView", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
         windowObject.transform.SetParent(canvas.transform, false);
         var window = windowObject.GetComponent<RectTransform>();
         window.anchorMin = new Vector2(0.5f, 0.5f);
         window.anchorMax = new Vector2(0.5f, 0.5f);
         window.pivot = new Vector2(0.5f, 0.5f);
-        window.sizeDelta = new Vector2(420f, 460f);
+        window.sizeDelta = new Vector2(width * scale, height * scale);
         float shift = 26f * (pictureWindows % 8);
         pictureWindows++;
         window.anchoredPosition = new Vector2(shift, -shift);
-        var background = windowObject.GetComponent<Image>();
-        background.sprite = Skin();
-        background.type = Image.Type.Simple;
-        background.color = new Color(0.16f, 0.16f, 0.18f, 1f);
-        background.raycastTarget = true;
-        windowObject.AddComponent<WindowDrag>().Target = window;
-
-        var imageObject = new GameObject("Photo", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
-        imageObject.transform.SetParent(window, false);
-        var imageRect = imageObject.GetComponent<RectTransform>();
-        imageRect.anchorMin = Vector2.zero;
-        imageRect.anchorMax = Vector2.one;
-        imageRect.offsetMin = new Vector2(16f, 16f);
-        imageRect.offsetMax = new Vector2(-16f, -48f);
-        var image = imageObject.GetComponent<Image>();
+        var image = windowObject.GetComponent<Image>();
         image.sprite = picture;
         image.preserveAspect = true;
+        image.color = Color.white;
         image.raycastTarget = true;
-        imageObject.AddComponent<WindowDrag>().Target = window;
 
         CreateCloseButton(window, () => Destroy(windowObject));
         window.SetAsLastSibling();
