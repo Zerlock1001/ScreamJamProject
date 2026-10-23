@@ -484,6 +484,96 @@ public class PetPhone : MonoBehaviour
         });
 
         StartCoroutine(ScrollToBottom());
+        NotifyNewMessage();
+    }
+
+    public void AddAudioMessage(string text, string playLabel, Action onPlay)
+    {
+        ActivateHost();
+        if (chatContent == null || string.IsNullOrEmpty(text))
+            return;
+
+        float textWidth = BubbleWidth - BubblePadX * 2f;
+        var measure = CreateText("Measure", transform, text, MessageFontSize, TextAnchor.UpperLeft, Color.black);
+        float textHeight = PreferredTextHeight(measure, textWidth);
+        measure.text = string.IsNullOrEmpty(playLabel) ? "Play" : playLabel;
+        float linkHeight = PreferredTextHeight(measure, textWidth);
+        DestroyImmediate(measure.gameObject);
+
+        float bubbleHeight = BubblePadY + textHeight + 4f + linkHeight + 2f + BubblePadY;
+        RectTransform row = BeginChatRow("MessageRow", BubbleWidth, bubbleHeight);
+        var bubble = new GameObject("Message", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(VerticalLayoutGroup), typeof(ContentSizeFitter), typeof(LayoutElement));
+        bubble.transform.SetParent(row, false);
+        var image = bubble.GetComponent<Image>();
+        image.sprite = Skin();
+        image.type = Image.Type.Simple;
+        image.color = new Color(0.86f, 0.88f, 0.9f, 1f);
+        image.raycastTarget = false;
+        var stack = bubble.GetComponent<VerticalLayoutGroup>();
+        stack.padding = new RectOffset((int)BubblePadX, (int)BubblePadX, (int)BubblePadY, (int)BubblePadY);
+        stack.spacing = 4f;
+        stack.childAlignment = TextAnchor.UpperLeft;
+        stack.childControlWidth = true;
+        stack.childControlHeight = true;
+        stack.childForceExpandWidth = true;
+        stack.childForceExpandHeight = false;
+        var fitter = bubble.GetComponent<ContentSizeFitter>();
+        fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+        fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        var bubbleLayout = bubble.GetComponent<LayoutElement>();
+        bubbleLayout.preferredWidth = BubbleWidth;
+        bubbleLayout.minWidth = BubbleWidth;
+        bubbleLayout.preferredHeight = bubbleHeight;
+
+        var body = CreateText("Label", bubble.transform, text, MessageFontSize, TextAnchor.UpperLeft, new Color(0.16f, 0.16f, 0.18f, 1f));
+        body.horizontalOverflow = HorizontalWrapMode.Wrap;
+        body.verticalOverflow = VerticalWrapMode.Overflow;
+        var bodyLayout = body.gameObject.AddComponent<LayoutElement>();
+        bodyLayout.preferredWidth = textWidth;
+        bodyLayout.preferredHeight = textHeight;
+
+        var linkBlue = new Color(0f, 0f, 0.933f, 1f);
+        var linkBlock = new GameObject("PlayBlock", typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(LayoutElement));
+        linkBlock.transform.SetParent(bubble.transform, false);
+        var linkStack = linkBlock.GetComponent<VerticalLayoutGroup>();
+        linkStack.spacing = 1f;
+        linkStack.childAlignment = TextAnchor.UpperLeft;
+        linkStack.childControlWidth = true;
+        linkStack.childControlHeight = true;
+        linkStack.childForceExpandWidth = false;
+        linkStack.childForceExpandHeight = false;
+        var linkBlockLayout = linkBlock.GetComponent<LayoutElement>();
+        linkBlockLayout.preferredWidth = textWidth;
+        linkBlockLayout.preferredHeight = linkHeight + 2f;
+
+        var link = CreateText("Play", linkBlock.transform, string.IsNullOrEmpty(playLabel) ? "Play" : playLabel, MessageFontSize, TextAnchor.UpperLeft, linkBlue);
+        link.horizontalOverflow = HorizontalWrapMode.Wrap;
+        link.verticalOverflow = VerticalWrapMode.Overflow;
+        link.raycastTarget = true;
+        float linkWidth = PreferredTextWidth(link, textWidth);
+        var linkLayout = link.gameObject.AddComponent<LayoutElement>();
+        linkLayout.preferredWidth = Mathf.Min(textWidth, linkWidth);
+        linkLayout.preferredHeight = linkHeight;
+
+        var lineObject = new GameObject("Underline", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(LayoutElement));
+        lineObject.transform.SetParent(linkBlock.transform, false);
+        var line = lineObject.GetComponent<Image>();
+        line.sprite = Skin();
+        line.type = Image.Type.Simple;
+        line.color = linkBlue;
+        line.raycastTarget = true;
+        var lineLayout = lineObject.GetComponent<LayoutElement>();
+        lineLayout.preferredWidth = Mathf.Min(textWidth, linkWidth);
+        lineLayout.preferredHeight = 1f;
+        lineLayout.minHeight = 1f;
+
+        var button = linkBlock.AddComponent<Button>();
+        button.targetGraphic = link;
+        button.transition = Selectable.Transition.None;
+        button.onClick.AddListener(() => onPlay?.Invoke());
+
+        StartCoroutine(ScrollToBottom());
+        NotifyNewMessage();
     }
 
     public void RemoveLastPostcard()
@@ -502,7 +592,7 @@ public class PetPhone : MonoBehaviour
         }
     }
 
-    public void AddPostcard(Sprite picture, string caption)
+    public void AddPostcard(Sprite picture, string caption, GifClip animation = null)
     {
         ActivateHost();
         if (chatContent == null)
@@ -548,9 +638,14 @@ public class PetPhone : MonoBehaviour
             pictureLayout.preferredWidth = 160f;
             var pictureButton = pictureObject.AddComponent<Button>();
             pictureButton.targetGraphic = pictureImage;
-            pictureButton.onClick.AddListener(() => OpenPicture(picture));
+            if (animation != null && animation.Frames != null && animation.Frames.Length > 1)
+                pictureObject.AddComponent<GifPlayer>().Play(animation);
+            GifClip shown = animation;
+            pictureButton.onClick.AddListener(() => OpenPicture(picture, shown));
         }
 
+        if (caption != null)
+        {
         var captionObject = new GameObject("Caption", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text), typeof(LayoutElement));
         captionObject.transform.SetParent(card.transform, false);
         var captionText = captionObject.GetComponent<Text>();
@@ -568,9 +663,21 @@ public class PetPhone : MonoBehaviour
         captionLayout.preferredWidth = captionWidth;
         captionLayout.preferredHeight = captionHeight;
         captionLayout.minHeight = captionHeight;
+        }
 
         StartCoroutine(ScrollToBottom());
         NotifyNewMessage();
+    }
+
+    public void AddGifReply(GifClip clip)
+    {
+        if (clip == null || clip.First == null)
+        {
+            AddMessage("...");
+            return;
+        }
+
+        AddPostcard(clip.First, null, clip);
     }
 
     void SubmitChat(string raw)
@@ -596,6 +703,8 @@ public class PetPhone : MonoBehaviour
         }
 
         AddOutgoingMessage(message);
+        if (PetCampaign.Ensure().HasJoinedCult)
+            AddGifReply(PetJourney.Instance != null ? PetJourney.Instance.PlaceholderGif() : null);
 
         if (chatInput != null)
             chatInput.ActivateInputField();
@@ -1506,7 +1615,7 @@ public class PetPhone : MonoBehaviour
         return font;
     }
 
-    void OpenPicture(Sprite picture)
+    void OpenPicture(Sprite picture, GifClip animation = null)
     {
         if (picture == null)
             return;
@@ -1535,6 +1644,8 @@ public class PetPhone : MonoBehaviour
         image.preserveAspect = true;
         image.color = Color.white;
         image.raycastTarget = true;
+        if (animation != null && animation.Frames != null && animation.Frames.Length > 1)
+            windowObject.AddComponent<GifPlayer>().Play(animation);
 
         CreateCloseButton(window, () => Destroy(windowObject));
         window.SetAsLastSibling();

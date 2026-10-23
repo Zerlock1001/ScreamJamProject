@@ -25,7 +25,17 @@ public class CapsuleMenu : MonoBehaviour
     static readonly string[] OptionLabels = { "journey", "quit" };
     static CapsuleMenu instance;
 
+    public static void UseBody(SpriteRenderer body)
+    {
+        if (instance == null || body == null)
+            return;
+
+        instance.capsule = body;
+        instance.hitRenderers = body.GetComponentsInChildren<SpriteRenderer>(true);
+    }
+
     SpriteRenderer capsule;
+    SpriteRenderer[] hitRenderers;
     Camera cam;
     SpriteRenderer panelRenderer;
     GameObject panelObject;
@@ -205,7 +215,9 @@ public class CapsuleMenu : MonoBehaviour
         if (optionRenderers == null || optionRenderers.Length == 0 || optionRenderers[0] == null)
             return;
 
-        bool available = PetJourney.Instance != null
+        bool joined = PetCampaign.Instance != null && PetCampaign.Instance.HasJoinedCult;
+        bool available = !joined
+            && PetJourney.Instance != null
             && PetJourney.Instance.JourneyAvailable
             && !PetCampaign.BlocksJourney;
         optionRenderers[0].color = available
@@ -403,7 +415,7 @@ public class CapsuleMenu : MonoBehaviour
         if (capsule == null || panelObject == null)
             return;
 
-        Bounds bounds = capsule.bounds;
+        Bounds bounds = HitBounds();
         float menuWorldScale = Mathf.Abs(panelObject.transform.lossyScale.x);
         float menuHalfWidth = PanelWidth * 0.5f * menuWorldScale;
         if (menuHalfWidth < 0.001f)
@@ -443,6 +455,13 @@ public class CapsuleMenu : MonoBehaviour
         switch (index)
         {
             case 0:
+                if (PetCampaign.Ensure().HasJoinedCult)
+                {
+                    SetMenuVisible(false);
+                    PetDialogue.Say("We don't need to limit you this way anymore.");
+                    return;
+                }
+
                 if (PetJourney.Instance == null
                     || !PetJourney.Instance.JourneyAvailable
                     || PetCampaign.BlocksJourney)
@@ -461,14 +480,41 @@ public class CapsuleMenu : MonoBehaviour
 
     bool HitsCapsule(Vector2 screenPoint)
     {
-        if (capsule == null || cam == null || capsule.sprite == null)
+        if (capsule == null || cam == null || capsule.sprite == null || !capsule.enabled)
             return false;
 
-        Bounds bounds = capsule.bounds;
+        Bounds bounds = HitBounds();
         float depth = Mathf.Abs(cam.transform.position.z - bounds.center.z);
         Vector3 world = cam.ScreenToWorldPoint(new Vector3(screenPoint.x, screenPoint.y, depth));
         world.z = bounds.center.z;
         return bounds.Contains(world);
+    }
+
+    Bounds HitBounds()
+    {
+        if (hitRenderers == null || hitRenderers.Length == 0)
+            return capsule.bounds;
+
+        bool any = false;
+        Bounds bounds = default;
+        for (int i = 0; i < hitRenderers.Length; i++)
+        {
+            SpriteRenderer renderer = hitRenderers[i];
+            if (renderer == null || !renderer.enabled || renderer.sprite == null)
+                continue;
+
+            if (!any)
+            {
+                bounds = renderer.bounds;
+                any = true;
+            }
+            else
+            {
+                bounds.Encapsulate(renderer.bounds);
+            }
+        }
+
+        return any ? bounds : capsule.bounds;
     }
 
     int OptionAt(Vector2 screenPoint)

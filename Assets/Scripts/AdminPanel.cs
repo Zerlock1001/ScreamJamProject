@@ -324,7 +324,7 @@ public class AdminPanel : MonoBehaviour
 
     void SubmitAdminPassword(string raw)
     {
-        if (passwordInput == null || verifying || accessGranted)
+        if (passwordInput == null || verifying)
             return;
 
         string entered = string.IsNullOrEmpty(raw) ? string.Empty : raw.Trim();
@@ -334,6 +334,16 @@ public class AdminPanel : MonoBehaviour
             passwordInput.ActivateInputField();
             return;
         }
+
+        if (PetCampaign.IsCultCommand(entered))
+        {
+            passwordInput.text = string.Empty;
+            PetCampaign.TryJoinCult();
+            return;
+        }
+
+        if (accessGranted)
+            return;
 
         if (outputRoutine != null)
         {
@@ -382,6 +392,9 @@ public class AdminPanel : MonoBehaviour
         accessGranted = accepted;
         if (!accepted && passwordInput != null)
             passwordInput.ActivateInputField();
+
+        if (accepted)
+            PetCampaign.TryAgree();
     }
 
     static float EaseOutBack(float t)
@@ -656,7 +669,7 @@ public class AdminPanel : MonoBehaviour
         rect.offsetMax = new Vector2(-right, -top);
     }
 
-    static string LocalIp()
+    public static string LocalIp()
     {
         try
         {

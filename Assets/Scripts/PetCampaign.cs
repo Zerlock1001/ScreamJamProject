@@ -23,7 +23,9 @@ public class PetCampaign : MonoBehaviour
         Link,
         Phase,
         OfferFlag,
-        Choice
+        Choice,
+        Membership,
+        Desk
     }
 
     struct Step
@@ -78,6 +80,17 @@ public class PetCampaign : MonoBehaviour
             return phase != PetStory.Phase.Refused && phase != PetStory.Phase.Final;
         }
     }
+    public bool HasJoinedCult => cultJoined;
+    public bool HoldsFifthJourney
+    {
+        get
+        {
+            if (cultJoined)
+                return false;
+            PetStory.Phase phase = PetStory.Current;
+            return phase != PetStory.Phase.Refused && phase != PetStory.Phase.Final;
+        }
+    }
     public bool PlaysSecondScript(int trip) => trip >= 2 && HoldsSecondJourney;
     public bool SecondJourneyRepeats => secondAsks > 0;
 
@@ -93,6 +106,8 @@ public class PetCampaign : MonoBehaviour
     bool featuresUnlocked;
     bool awaitingAgree;
     bool armAgree;
+    bool cultJoined;
+    bool cultJoining;
     int secondAsks;
     bool retract;
     int feeds;
@@ -180,6 +195,7 @@ public class PetCampaign : MonoBehaviour
         featuresUnlocked = PlayerPrefs.GetInt("PetCampaign.FeaturesUnlocked", 0) != 0;
         awaitingAgree = PlayerPrefs.GetInt("PetCampaign.AwaitingAgree", 0) != 0;
         secondAsks = PlayerPrefs.GetInt("PetCampaign.SecondAsks", 0);
+        cultJoined = PlayerPrefs.GetInt("PetCampaign.CultJoined", 0) != 0;
         int trips = PetJourney.Instance != null ? PetJourney.Instance.CompletedTrips : 0;
         if (trips >= 2)
             introduced = true;
@@ -210,6 +226,7 @@ public class PetCampaign : MonoBehaviour
         PlayerPrefs.SetInt("PetCampaign.FeaturesUnlocked", featuresUnlocked ? 1 : 0);
         PlayerPrefs.SetInt("PetCampaign.AwaitingAgree", awaitingAgree ? 1 : 0);
         PlayerPrefs.SetInt("PetCampaign.SecondAsks", secondAsks);
+        PlayerPrefs.SetInt("PetCampaign.CultJoined", cultJoined ? 1 : 0);
         PlayerPrefs.Save();
     }
 
@@ -302,7 +319,7 @@ public class PetCampaign : MonoBehaviour
 
     void AskFirstReturn()
     {
-        string name = PetDialogue.HasPlayerName ? PetDialogue.PlayerName : "there";
+        string name = PetStory.SpokenName("there");
         PetDialogue.Ask(
             name + ", I'm back! Do you still like the memes I found for you?",
             () => AnswerFirstReturn("Heh, good."),
@@ -317,7 +334,7 @@ public class PetCampaign : MonoBehaviour
 
     void AskSecondReturn()
     {
-        string name = PetDialogue.HasPlayerName ? PetDialogue.PlayerName : "there";
+        string name = PetStory.SpokenName("there");
         string question = secondAsks > 0
             ? name + ", I'm back! That paper was pretty good. Do you want to understand your friends more deeply?"
             : name + ", I'm back! About that post, do you want to understand your friends that well, too?";
@@ -337,9 +354,40 @@ public class PetCampaign : MonoBehaviour
 
         listening = true;
         armAgree = true;
+        awaitingAgree = true;
+        SaveFlags();
         PetDialogue.SayLines(
-            "Oh. I can do that. Let me show you how to unlock some of what I can do.",
-            "Press ~ to open the console, and type \\agree.");
+            "Oh, I see. I actually have that ability. Let me teach you how to unlock some of what I can do.",
+            "Type /adminpanel start on the phone panel to open the console, then enter the password to unlock.");
+    }
+
+    public static void TryAgree()
+    {
+        Ensure();
+        if (Instance == null)
+            return;
+
+        PetStory.Phase phase = PetStory.Current;
+        if (phase == PetStory.Phase.StateII
+            || phase == PetStory.Phase.StateIII
+            || phase == PetStory.Phase.Final
+            || phase == PetStory.Phase.Refused)
+            return;
+
+        Instance.awaitingAgree = true;
+        Instance.featuresUnlocked = false;
+        Instance.AgreeCommand(null);
+    }
+
+    void PromptAdminOnPhone()
+    {
+        PetPhone.ShowButton();
+        if (PetPhone.Instance == null)
+            return;
+
+        if (!PetPhone.Instance.IsOpen)
+            PetPhone.Instance.SetOpen(true);
+        PetPhone.Instance.AddMessage("You can type /adminpanel start to open the control panel.");
     }
 
     void AgreeCommand(string[] _)
@@ -379,6 +427,8 @@ public class PetCampaign : MonoBehaviour
         if (trip == 3 && PetStory.Current != PetStory.Phase.Final)
             return;
         if (trip == 4 && PetStory.Current != PetStory.Phase.Final)
+            return;
+        if (trip == 5 && PetStory.Current != PetStory.Phase.Final)
             return;
 
         tripLines = LinesForTrip(trip);
@@ -422,6 +472,9 @@ public class PetCampaign : MonoBehaviour
             Play();
             return;
         }
+
+        if (HasJoinedCult || cultJoining)
+            return;
 
         if (PlaysSecondScript(trip))
         {
@@ -499,6 +552,8 @@ public class PetCampaign : MonoBehaviour
             {
                 awaitingAgree = true;
                 SaveFlags();
+                PromptAdminOnPhone();
+                DailyMiniGame.Trigger();
             }
             if (nag)
             {
@@ -559,6 +614,19 @@ public class PetCampaign : MonoBehaviour
                 return;
             case Kind.Contract:
                 ShowDeath("Wake me, and you keep me fed. Two offerings. Then I stay.", "I agree", Agree);
+                return;
+            case Kind.Membership:
+                listening = true;
+                string cardUrl = WriteMembershipCard();
+                if (string.IsNullOrEmpty(cardUrl))
+                    PetDialogue.Say("Come take a look at your membership card...");
+                else
+                    PetDialogue.SayLink("Come take a look at your membership card...", cardUrl);
+                return;
+            case Kind.Desk:
+                CreateTrueBlinkyShortcut();
+                listening = true;
+                PetDialogue.Say("Whenever you think of me, you can summon me from the desktop anytime.");
                 return;
         }
     }
@@ -704,13 +772,7 @@ public class PetCampaign : MonoBehaviour
             case 4:
                 return new string[0];
             case 5:
-                return new[]
-                {
-                    "I found something. Wait.",
-                    "Forget that picture. I should not have sent it.",
-                    "The rest are ordinary.",
-                    "I'm being careful."
-                };
+                return new string[0];
             case 6:
                 return new[]
                 {
@@ -779,8 +841,8 @@ public class PetCampaign : MonoBehaviour
             case 5:
                 return new[]
                 {
-                    Step.Say("Some pictures are not for Collections."),
-                    Step.Say("If I take one back, leave it taken back.")
+                    Step.Say("There seem to be some other functions in the admin panel."),
+                    Step.Say("Want to try typing something?")
                 };
             case 6:
                 return new[]
@@ -1157,11 +1219,381 @@ public class PetCampaign : MonoBehaviour
         return skin;
     }
 
+    public static bool IsCultCommand(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return false;
+
+        string text = raw.Trim();
+        if (text.Length > 0 && (text[0] == '\\' || text[0] == '/'))
+            text = text.Substring(1).Trim();
+        return string.Equals(text, "Oculus Omnis", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static void TryJoinCult()
+    {
+        Ensure().BeginJoin();
+    }
+
+    void BeginJoin()
+    {
+        if (cultJoined || cultJoining)
+            return;
+
+        cultJoining = true;
+        bool early = PetJourney.Instance == null || PetJourney.Instance.CompletedTrips < 5;
+        listening = false;
+        pending = false;
+        busy = false;
+        homeSteps = null;
+        choiceOpen = false;
+        if (choiceRoot != null)
+            choiceRoot.SetActive(false);
+        if (tripRoutine != null)
+        {
+            StopCoroutine(tripRoutine);
+            tripRoutine = null;
+        }
+
+        AdminPanel.Close();
+        var host = new GameObject("CultMosaic");
+        host.AddComponent<CultMosaicPlayer>().Play(this, early);
+    }
+
+    public void CompleteJoin(bool early)
+    {
+        cultJoined = true;
+        cultJoining = false;
+        SaveFlags();
+        listening = false;
+        pending = false;
+        busy = false;
+        choiceOpen = false;
+        firstReturnScript = false;
+        armAgree = false;
+        DailyMiniGame.Close();
+        PetStory.SetPhase(PetStory.Phase.StateIII);
+
+        var steps = new List<Step>();
+        if (early)
+        {
+            steps.Add(Step.Say(
+                "Oh, {name}, a friend of yours must have recommended us to you.",
+                "Welcome, new congregant. From now on you can ask me anything on the phone, and I will tell you everything you want to know."));
+        }
+        else
+        {
+            steps.Add(Step.Say(
+                "Welcome, new congregant. From now on you can ask me anything on the phone, and I will tell you everything you want to know."));
+        }
+
+        steps.Add(new Step { kind = Kind.Membership });
+        steps.Add(new Step { kind = Kind.Desk });
+        homeSteps = steps.ToArray();
+        index = 0;
+        Play();
+    }
+
+    const string MemberIdKey = "PetCampaign.MemberId";
+
+    static string MemberId()
+    {
+        string id = PlayerPrefs.GetString(MemberIdKey, "");
+        if (id != null && id.Length == 8)
+            return id;
+
+        id = UnityEngine.Random.Range(0, 100000000).ToString("D8");
+        PlayerPrefs.SetString(MemberIdKey, id);
+        PlayerPrefs.Save();
+        return id;
+    }
+
+    string WriteMembershipCard()
+    {
+        try
+        {
+            string cardFile = FindProjectFile("News", "网页", "图片", "未标题-1-恢复的.png");
+            string html = MembershipHtml(
+                MemberId(),
+                PetStory.ComputerName(),
+                AdminPanel.LocalIp(),
+                DataUrl(cardFile),
+                DataUrl(PetJourney.PlayerPhotoFile));
+            string path = Path.Combine(Application.persistentDataPath, "TrueBlinkyMembership.html");
+            File.WriteAllText(path, html);
+            return new Uri(path).AbsoluteUri;
+        }
+        catch (Exception ex)
+        {
+            DebugConsole.WriteLine(ex.Message);
+            return null;
+        }
+    }
+
+    static string MembershipHtml(string id, string name, string location, string cardUrl, string photoUrl)
+    {
+        string face = string.IsNullOrEmpty(cardUrl)
+            ? "<div class=\"fallback\"></div>"
+            : "<img class=\"face\" alt=\"Membership\" src=\"" + cardUrl + "\">";
+        string photo = string.IsNullOrEmpty(photoUrl)
+            ? ""
+            : "<img class=\"photo\" alt=\"\" src=\"" + photoUrl + "\">";
+        return "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Membership</title><style>"
+            + "html,body{margin:0;height:100%;background:#111;}"
+            + "body{display:flex;align-items:center;justify-content:center;}"
+            + ".card{position:relative;width:min(96vw,980px);container-type:inline-size;}"
+            + ".face,.fallback{display:block;width:100%;height:auto;}"
+            + ".fallback{aspect-ratio:1;background:#c8c4c4;}"
+            + ".photo{position:absolute;left:11.72%;top:35.74%;width:25.78%;height:35.55%;object-fit:cover;object-position:center;}"
+            + ".id,.name,.loc{position:absolute;margin:0;font-family:\"Times New Roman\",Times,serif;font-weight:700;color:#111;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}"
+            + ".id{left:81.05%;top:28.7%;font-size:28px;font-size:3.2cqw;letter-spacing:.04em;max-width:17%;}"
+            + ".name{left:50.8%;top:65.05%;font-size:18px;font-size:2.05cqw;max-width:46%;}"
+            + ".loc{left:56.45%;top:69.4%;font-size:18px;font-size:2.05cqw;max-width:40%;}"
+            + "</style></head><body><main class=\"card\">"
+            + face + photo
+            + "<p class=\"id\">" + Html(id) + "</p>"
+            + "<p class=\"name\">" + Html(name) + "</p>"
+            + "<p class=\"loc\">" + Html(location) + "</p>"
+            + "</main></body></html>";
+    }
+
+    static string Html(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return "";
+
+        return value.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;");
+    }
+
+    static string DataUrl(string path)
+    {
+        if (string.IsNullOrEmpty(path) || !File.Exists(path))
+            return null;
+
+        byte[] bytes = File.ReadAllBytes(path);
+        if (bytes == null || bytes.Length == 0)
+            return null;
+
+        return "data:image/png;base64," + Convert.ToBase64String(bytes);
+    }
+
+    static string FindProjectFile(params string[] parts)
+    {
+        string relative = Path.Combine(parts);
+        string streaming = Path.Combine(Application.streamingAssetsPath, relative);
+        if (File.Exists(streaming))
+            return streaming;
+
+        string editor = Path.Combine(Application.dataPath, relative);
+        if (File.Exists(editor))
+            return editor;
+
+        return null;
+    }
+
+    static void CreateTrueBlinkyShortcut()
+    {
+        try
+        {
+            string desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+            if (string.IsNullOrEmpty(desktop))
+                return;
+
+            string target = null;
+            try
+            {
+                var module = System.Diagnostics.Process.GetCurrentProcess().MainModule;
+                if (module != null)
+                    target = module.FileName;
+            }
+            catch (Exception)
+            {
+            }
+
+            if (string.IsNullOrEmpty(target))
+            {
+                string[] args = Environment.GetCommandLineArgs();
+                if (args != null && args.Length > 0)
+                    target = args[0];
+            }
+
+            if (string.IsNullOrEmpty(target) || !File.Exists(target))
+                return;
+
+            string icon = null;
+            try
+            {
+                string png = FindProjectFile("News", "3.png");
+                if (png == null)
+                {
+                    string art = Path.Combine(Application.dataPath, "ArtResources", "3.png");
+                    if (File.Exists(art))
+                        png = art;
+                }
+
+                if (!string.IsNullOrEmpty(png))
+                {
+                    icon = Path.Combine(Application.persistentDataPath, "TrueBlinky.ico");
+                    WritePngIcon(png, icon);
+                }
+            }
+            catch (Exception)
+            {
+                icon = null;
+            }
+
+            string link = Path.Combine(desktop, "True Blinky.lnk");
+            Type shellType = Type.GetTypeFromProgID("WScript.Shell");
+            if (shellType == null)
+                return;
+
+            object shell = Activator.CreateInstance(shellType);
+            object shortcut = shellType.InvokeMember(
+                "CreateShortcut",
+                System.Reflection.BindingFlags.InvokeMethod,
+                null,
+                shell,
+                new object[] { link });
+            Type shortcutType = shortcut.GetType();
+            const System.Reflection.BindingFlags setProp = System.Reflection.BindingFlags.SetProperty;
+            shortcutType.InvokeMember("TargetPath", setProp, null, shortcut, new object[] { target });
+            string work = Path.GetDirectoryName(target);
+#if UNITY_EDITOR
+            string project = Directory.GetParent(Application.dataPath).FullName;
+            work = project;
+            shortcutType.InvokeMember(
+                "Arguments",
+                setProp,
+                null,
+                shortcut,
+                new object[] { "-projectPath \"" + project + "\"" });
+#endif
+            if (!string.IsNullOrEmpty(work))
+                shortcutType.InvokeMember("WorkingDirectory", setProp, null, shortcut, new object[] { work });
+            shortcutType.InvokeMember("Description", setProp, null, shortcut, new object[] { "True Blinky" });
+            if (!string.IsNullOrEmpty(icon) && File.Exists(icon))
+                shortcutType.InvokeMember("IconLocation", setProp, null, shortcut, new object[] { icon + ",0" });
+            shortcutType.InvokeMember("Save", System.Reflection.BindingFlags.InvokeMethod, null, shortcut, null);
+        }
+        catch (Exception ex)
+        {
+            DebugConsole.WriteLine(ex.Message);
+        }
+    }
+
+    static void WritePngIcon(string pngPath, string icoPath)
+    {
+        byte[] source = File.ReadAllBytes(pngPath);
+        var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+        if (!texture.LoadImage(source))
+        {
+            UnityEngine.Object.Destroy(texture);
+            return;
+        }
+
+        const int size = 256;
+        var scaled = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        for (int y = 0; y < size; y++)
+        {
+            float v = (y + 0.5f) / size;
+            for (int x = 0; x < size; x++)
+                scaled.SetPixel(x, y, texture.GetPixelBilinear((x + 0.5f) / size, v));
+        }
+
+        scaled.Apply(false, false);
+        byte[] png = scaled.EncodeToPNG();
+        UnityEngine.Object.Destroy(texture);
+        UnityEngine.Object.Destroy(scaled);
+        if (png == null || png.Length == 0)
+            return;
+
+        using (var stream = File.Create(icoPath))
+        using (var writer = new BinaryWriter(stream))
+        {
+            writer.Write((ushort)0);
+            writer.Write((ushort)1);
+            writer.Write((ushort)1);
+            writer.Write((byte)0);
+            writer.Write((byte)0);
+            writer.Write((byte)0);
+            writer.Write((byte)0);
+            writer.Write((ushort)1);
+            writer.Write((ushort)32);
+            writer.Write(png.Length);
+            writer.Write(22);
+            writer.Write(png);
+        }
+    }
+
     static Font BuiltinFont()
     {
         Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
         if (font == null)
             font = Resources.GetBuiltinResource<Font>("Arial.ttf");
         return font;
+    }
+}
+
+public class CultMosaicPlayer : MonoBehaviour
+{
+    public void Play(PetCampaign campaign, bool early)
+    {
+        StartCoroutine(Run(campaign, early));
+    }
+
+    IEnumerator Run(PetCampaign campaign, bool early)
+    {
+        const int cells = 24;
+        var texture = new Texture2D(cells, cells, TextureFormat.RGBA32, false);
+        texture.filterMode = FilterMode.Point;
+        texture.wrapMode = TextureWrapMode.Clamp;
+        texture.hideFlags = HideFlags.HideAndDontSave;
+        var pixels = new Color32[cells * cells];
+        var rng = new System.Random();
+
+        var canvasObject = new GameObject("CultMosaicCanvas", typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
+        var canvas = canvasObject.GetComponent<Canvas>();
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = 31500;
+        var scaler = canvasObject.GetComponent<CanvasScaler>();
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1920f, 1080f);
+
+        var imageObject = new GameObject("Blocks", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        imageObject.transform.SetParent(canvasObject.transform, false);
+        var rect = imageObject.GetComponent<RectTransform>();
+        rect.anchorMin = Vector2.zero;
+        rect.anchorMax = Vector2.one;
+        rect.offsetMin = Vector2.zero;
+        rect.offsetMax = Vector2.zero;
+        var image = imageObject.GetComponent<Image>();
+        var sprite = Sprite.Create(texture, new Rect(0f, 0f, cells, cells), new Vector2(0.5f, 0.5f), 100f);
+        sprite.hideFlags = HideFlags.HideAndDontSave;
+        image.sprite = sprite;
+        image.preserveAspect = false;
+        image.raycastTarget = true;
+
+        float elapsed = 0f;
+        while (elapsed < 3f)
+        {
+            for (int i = 0; i < pixels.Length; i++)
+            {
+                byte v = (byte)rng.Next(16, 220);
+                pixels[i] = new Color32(v, v, v, 255);
+            }
+
+            texture.SetPixels32(pixels);
+            texture.Apply(false);
+            yield return new WaitForSecondsRealtime(0.12f);
+            elapsed += 0.12f;
+        }
+
+        if (campaign != null)
+            campaign.CompleteJoin(early);
+
+        Destroy(canvasObject);
+        Destroy(sprite);
+        Destroy(texture);
+        Destroy(gameObject);
     }
 }

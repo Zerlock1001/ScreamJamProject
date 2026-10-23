@@ -123,6 +123,62 @@ public class DailyMiniGame : MonoBehaviour
         instance.ShowDailyPopup();
     }
 
+    public static void Close()
+    {
+        if (instance == null)
+            return;
+
+        instance.Dismiss();
+    }
+
+    void Dismiss()
+    {
+        if (popupAnimRoutine != null)
+        {
+            StopCoroutine(popupAnimRoutine);
+            popupAnimRoutine = null;
+        }
+
+        if (popupHoverRoutine != null)
+        {
+            StopCoroutine(popupHoverRoutine);
+            popupHoverRoutine = null;
+        }
+
+        if (windowAnimRoutine != null)
+        {
+            StopCoroutine(windowAnimRoutine);
+            windowAnimRoutine = null;
+        }
+
+        windowTransitioning = false;
+        if (popup != null)
+        {
+            popup.SetActive(false);
+            if (popupRect != null)
+                popupRect.localScale = Vector3.one * PopupBaseScale;
+            if (popupGroup != null)
+            {
+                popupGroup.alpha = 1f;
+                popupGroup.interactable = true;
+                popupGroup.blocksRaycasts = true;
+            }
+        }
+
+        if (window != null)
+        {
+            window.SetActive(false);
+            if (windowRect != null)
+                windowRect.localScale = Vector3.one;
+            if (windowGroup != null)
+            {
+                windowGroup.alpha = 1f;
+                windowGroup.interactable = true;
+                windowGroup.blocksRaycasts = true;
+            }
+        }
+    }
+
     static void Ensure()
     {
         if (instance != null)

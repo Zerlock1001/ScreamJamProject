@@ -26,6 +26,15 @@ public class PetStory : MonoBehaviour
     public static void SetPhase(Phase phase)
     {
         Current = phase;
+        if (phase == Phase.StateII)
+        {
+            PetDialogue.UseStatus2();
+            DailyMiniGame.Close();
+        }
+        if (phase == Phase.StateII || phase == Phase.StateIII || phase == Phase.Final)
+            SetUseComputerName(true);
+        if (phase == Phase.Final && PetJourney.Instance != null)
+            PetJourney.Instance.UseFinalCharacter();
         if (!PetJourney.SavesProgress)
             return;
 
@@ -64,6 +73,26 @@ public class PetStory : MonoBehaviour
             saved = (int)Phase.Normal;
         Current = (Phase)saved;
         UseComputerName = PlayerPrefs.GetInt(ComputerNameKey, 0) != 0;
+        if (AddressesByComputer(Current) && !UseComputerName)
+        {
+            UseComputerName = true;
+            PlayerPrefs.SetInt(ComputerNameKey, 1);
+            PlayerPrefs.Save();
+        }
+    }
+
+    public static string SpokenName(string fallback = "you")
+    {
+        if (AddressesByComputer(Current) || UseComputerName)
+            return ComputerName();
+        if (PetDialogue.HasPlayerName)
+            return PetDialogue.PlayerName;
+        return string.IsNullOrEmpty(fallback) ? "you" : fallback;
+    }
+
+    static bool AddressesByComputer(Phase phase)
+    {
+        return phase == Phase.StateII || phase == Phase.StateIII || phase == Phase.Final;
     }
 
     public static string ApplyName(string line)
@@ -73,28 +102,13 @@ public class PetStory : MonoBehaviour
         if (Current == Phase.Refused)
             return RefuseSpeech;
 
-        if (UseComputerName)
+        if (UseComputerName || AddressesByComputer(Current))
         {
             string user = ComputerName();
             return line.Replace("{Name}", user).Replace("{name}", user);
         }
 
-        string name = PetDialogue.HasPlayerName ? PetDialogue.PlayerName : "you";
-        if (Current == Phase.StateIII || Current == Phase.Final)
-            return line.Replace("{Name}", name).Replace("{name}", name);
-        if (Current == Phase.StateII)
-        {
-            string occasional = (line.Length + PlayerNameSalt()) % 2 == 0 ? name : "you";
-            return line.Replace("{Name}", name).Replace("{name}", occasional);
-        }
-
         return line.Replace("{Name}", "you").Replace("{name}", "you");
-    }
-
-    static int PlayerNameSalt()
-    {
-        string name = PetDialogue.HasPlayerName ? PetDialogue.PlayerName : string.Empty;
-        return name.Length;
     }
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -147,11 +161,11 @@ public class PetStory : MonoBehaviour
         DebugConsole.WriteLine("普通态 — 开场。第四次远行死亡并复活后进入状态 I。");
         DebugConsole.WriteLine("状态 I — 不使用玩家名。第六次远行死亡，打开复活界面后自动完成妙妙仪式，进入状态 II，并刷新状态与远行冷却。");
         DebugConsole.WriteLine("状态 II — 第二次远行同意并输入 \\agree 后进入。直接使用电脑用户名。");
-        DebugConsole.WriteLine("状态 III — 全部使用玩家名，频繁涉及隐私与邪教。第九、十次远行给出控制台指令，进入结局选择。");
+        DebugConsole.WriteLine("状态 III — 继续使用电脑用户名，频繁涉及隐私与邪教。第九、十次远行给出控制台指令，进入结局选择。");
         DebugConsole.WriteLine("最终态 — 选择加入后，从远行库和常规库里不重复抽取。");
         DebugConsole.WriteLine("拒绝结局 — 全部文本被替换，并在桌面留下 txt。");
         DebugConsole.WriteLine("第一次远行回来之后，图库、喂食、玩耍、死亡、复活、饥饿和结局会按次数往下走。");
-        DebugConsole.WriteLine("\\agree 之后直接使用电脑用户名。状态 III 和加入结局每次都用玩家名。");
+        DebugConsole.WriteLine("进入状态 II 之后，称呼都使用电脑用户名，重进游戏也保持。");
     }
 
     static string NameRule(Phase phase)
@@ -159,10 +173,9 @@ public class PetStory : MonoBehaviour
         switch (phase)
         {
             case Phase.StateII:
-                return UseComputerName ? "直接使用电脑用户名" : "偶尔使用玩家名";
             case Phase.StateIII:
             case Phase.Final:
-                return "全部使用玩家名";
+                return "直接使用电脑用户名";
             case Phase.Refused:
                 return "使用替换后的文本";
             default:

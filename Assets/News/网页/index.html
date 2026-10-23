@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>画布工坊 · 轻量排版编辑器</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <svg class="icon-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="i-logo" viewBox="0 0 24 24"><rect x="3" y="5" width="13" height="13" rx="3"/><path d="M8 3h10a3 3 0 0 1 3 3v10"/><path d="m7 14 2.5-2.5 2.5 2.5 2-2 3 3"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="m9 14-5-5 5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-1"/></symbol>
+    <symbol id="i-redo" viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h1"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="m3 3 18 18"/><path d="M10.6 6.1A10.8 10.8 0 0 1 12 6c6 0 9.5 6 9.5 6a16.6 16.6 0 0 1-2.4 3.1"/><path d="M6.2 6.2C3.8 8 2.5 12 2.5 12S6 18 12 18a10.8 10.8 0 0 0 4.2-.8"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-unlock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 7.7-1.5"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></symbol>
+    <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 20h16"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v12M7 11l5 5 5-5M4 20h16"/></symbol>
+    <symbol id="i-import" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 19v1h16v-1"/></symbol>
+    <symbol id="i-export" viewBox="0 0 24 24"><path d="M12 15V3M7 8l5-5 5 5"/><path d="M4 19v1h16v-1"/></symbol>
+    <symbol id="i-preview" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7Z"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.4 9a2.8 2.8 0 0 1 5.4 1c0 2-2.8 2.2-2.8 4"/><path d="M12 17.5h.01"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-fit" viewBox="0 0 24 24"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></symbol>
+    <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+    <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-grip" viewBox="0 0 24 24"><circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/></symbol>
+    <symbol id="i-pages" viewBox="0 0 24 24"><path d="M8 3h9a3 3 0 0 1 3 3v12H8a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M6 7H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h11"/><path d="M11 8h5M11 12h5"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5Z"/><path d="m3 12 9 5 9-5"/><path d="m3 16 9 5 9-5"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4.5 4.5L19 7"/></symbol>
+    <symbol id="i-rotate" viewBox="0 0 24 24"><path d="M20 7v5h-5"/><path d="M19.3 12a7.5 7.5 0 1 1-2.1-5.2L20 9.5"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2.5 20h19Z"/><path d="M12 9v5M12 17.5h.01"/></symbol>
+    <symbol id="i-text" viewBox="0 0 24 24"><path d="M5 5h14M12 5v14M8.5 19h7"/></symbol>
+  </svg>
+
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark"><svg class="ico"><use href="#i-logo"></use></svg></div>
+        <div class="brand-copy">
+          <strong>画布工坊</strong>
+          <span>轻量排版编辑器</span>
+        </div>
+      </div>
+
+      <div class="save-state" id="saveState" data-state="saved" title="项目会自动保存">
+        <span class="save-dot"></span>
+        <span id="saveText">已保存</span>
+      </div>
+
+      <div class="topbar-spacer"></div>
+
+      <div class="topbar-group">
+        <button class="icon-btn" id="undoBtn" type="button" title="撤销 (Ctrl+Z)" disabled>
+          <svg class="ico"><use href="#i-undo"></use></svg>
+        </button>
+        <button class="icon-btn" id="redoBtn" type="button" title="重做 (Ctrl+Shift+Z)" disabled>
+          <svg class="ico"><use href="#i-redo"></use></svg>
+        </button>
+      </div>
+      <div class="topbar-divider"></div>
+      <div class="topbar-group topbar-file-actions">
+        <button class="btn btn-ghost btn-text-add" id="addTextBtn" type="button" title="添加文字图层">
+          <svg class="ico"><use href="#i-text"></use></svg>
+          <span class="btn-label">文字</span>
+        </button>
+        <button class="btn btn-ghost" id="importBtn" type="button" title="导入完整项目 JSON">
+          <svg class="ico"><use href="#i-import"></use></svg>
+          <span class="btn-label">导入</span>
+        </button>
+        <button class="btn btn-ghost" id="exportBtn" type="button" title="导出完整项目 JSON">
+          <svg class="ico"><use href="#i-export"></use></svg>
+          <span class="btn-label">导出</span>
+        </button>
+        <button class="btn btn-ghost icon-only" id="helpBtn" type="button" title="使用说明与快捷键">
+          <svg class="ico"><use href="#i-help"></use></svg>
+        </button>
+      </div>
+      <button class="btn btn-primary" id="previewBtn" type="button" title="预览当前页面">
+        <svg class="ico"><use href="#i-preview"></use></svg>
+        <span class="btn-label">预览</span>
+      </button>
+    </header>
+
+    <div class="app-main">
+      <aside class="sidebar left-sidebar">
+        <section class="panel pages-panel">
+          <div class="panel-head">
+            <div class="panel-title">
+              <svg class="ico"><use href="#i-pages"></use></svg>
+              <span>页面</span>
+              <span class="count" id="pageCount">1</span>
+            </div>
+            <button class="icon-btn small" id="addPageBtn" type="button" title="新建页面">
+              <svg class="ico"><use href="#i-plus"></use></svg>
+            </button>
+          </div>
+          <div class="pages-list" id="pagesList"></div>
+        </section>
+
+        <section class="panel assets-panel">
+          <div class="panel-head">
+            <div class="panel-title">
+              <svg class="ico"><use href="#i-layers"></use></svg>
+              <span>素材库</span>
+              <span class="count" id="assetCount">0</span>
+            </div>
+            <button class="icon-btn small" id="uploadBtn" type="button" title="上传图片素材">
+              <svg class="ico"><use href="#i-upload"></use></svg>
+            </button>
+          </div>
+          <div class="asset-drop-zone" id="assetDropZone">
+            <div class="assets-grid" id="assetsGrid"></div>
+            <div class="asset-empty" id="assetEmpty">
+              <div class="empty-orb"><svg class="ico"><use href="#i-image"></use></svg></div>
+              <strong>上传透明图片</strong>
+              <span>PNG / WebP / SVG / GIF</span>
+              <button class="btn btn-tiny" id="emptyUploadBtn" type="button">选择图片</button>
+            </div>
+            <div class="drop-cover">
+              <svg class="ico"><use href="#i-upload"></use></svg>
+              <strong>松开即可上传</strong>
+            </div>
+          </div>
+          <div class="asset-tip">点击素材，即可放入当前页面</div>
+        </section>
+      </aside>
+
+      <main class="workspace" id="workspace">
+        <div class="workspace-scroll" id="workspaceScroll">
+          <div class="stage" id="stage">
+            <div class="canvas-scale" id="canvasScale">
+              <div class="canvas-frame" id="canvasFrame">
+                <div class="canvas" id="canvas" aria-label="排版画布"></div>
+                <div class="selection-overlay" id="selectionOverlay">
+                  <div class="selection-box" id="selectionBox">
+                    <div class="rotate-stem"></div>
+                    <div class="sel-handle h-nw" data-handle="nw"></div>
+                    <div class="sel-handle h-ne" data-handle="ne"></div>
+                    <div class="sel-handle h-se" data-handle="se"></div>
+                    <div class="sel-handle h-sw" data-handle="sw"></div>
+                    <div class="rotate-handle" data-handle="rotate" title="拖动旋转">
+                      <svg class="ico"><use href="#i-rotate"></use></svg>
+                    </div>
+                    <div class="sel-badge" id="selBadge"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="workspace-corner">
+          <div class="wheel-hint">
+            <span>滚轮滚动</span>
+            <span class="hint-dot"></span>
+            <span>Ctrl + 滚轮缩放</span>
+          </div>
+          <div class="zoom-pill">
+            <button class="zoom-btn" id="zoomOutBtn" type="button" title="缩小">
+              <svg class="ico"><use href="#i-minus"></use></svg>
+            </button>
+            <button class="zoom-value" id="zoomValueBtn" type="button" title="恢复到 100%">100%</button>
+            <button class="zoom-btn" id="zoomInBtn" type="button" title="放大">
+              <svg class="ico"><use href="#i-plus"></use></svg>
+            </button>
+            <span class="zoom-separator"></span>
+            <button class="zoom-btn" id="fitBtn" type="button" title="适应窗口">
+              <svg class="ico"><use href="#i-fit"></use></svg>
+            </button>
+          </div>
+        </div>
+      </main>
+
+      <aside class="sidebar right-sidebar">
+        <section class="text-inspector" id="textInspector" hidden>
+          <div class="text-inspector-head">
+            <div class="panel-title">
+              <svg class="ico"><use href="#i-text"></use></svg>
+              <span>文字设置</span>
+            </div>
+            <span class="panel-note">双击画布编辑</span>
+          </div>
+          <div class="text-inspector-body">
+            <label class="text-field">
+              <span class="text-field-label">字体</span>
+              <select class="text-select" id="textFontSelect" aria-label="字体">
+                <option value='"Microsoft YaHei", "PingFang SC", sans-serif'>微软雅黑</option>
+                <option value='SimHei, "Microsoft YaHei", sans-serif'>黑体</option>
+                <option value='SimSun, "Songti SC", serif'>宋体</option>
+                <option value='KaiTi, "Kaiti SC", serif'>楷体</option>
+                <option value='Arial, "Microsoft YaHei", sans-serif'>Arial</option>
+                <option value='Georgia, "Songti SC", serif'>Georgia</option>
+                <option value='"Courier New", monospace'>Courier New</option>
+                <option value='Impact, "Microsoft YaHei", sans-serif'>Impact</option>
+              </select>
+            </label>
+            <div class="text-field">
+              <span class="text-field-label">字号</span>
+              <div class="font-size-stepper">
+                <button class="stepper-btn" id="fontSizeMinus" type="button" title="缩小字号">
+                  <svg class="ico"><use href="#i-minus"></use></svg>
+                </button>
+                <input class="font-size-input" id="fontSizeInput" type="number" min="6" max="400" step="1" value="72" list="fontSizePresets" aria-label="字号">
+                <span class="font-unit">px</span>
+                <button class="stepper-btn" id="fontSizePlus" type="button" title="放大字号">
+                  <svg class="ico"><use href="#i-plus"></use></svg>
+                </button>
+              </div>
+            </div>
+            <div class="text-field">
+              <span class="text-field-label">样式</span>
+              <div class="text-style-tools">
+                <button class="style-btn bold-btn" id="textBoldBtn" type="button" title="粗体">B</button>
+                <label class="color-btn" title="文字颜色">
+                  <span class="color-dot" id="textColorDot"></span>
+                  <span>颜色</span>
+                  <input type="color" id="textColorInput" value="#1d1d1f" aria-label="文字颜色">
+                </label>
+              </div>
+            </div>
+            <datalist id="fontSizePresets">
+              <option value="12"></option>
+              <option value="16"></option>
+              <option value="20"></option>
+              <option value="24"></option>
+              <option value="32"></option>
+              <option value="40"></option>
+              <option value="48"></option>
+              <option value="56"></option>
+              <option value="64"></option>
+              <option value="72"></option>
+              <option value="80"></option>
+              <option value="96"></option>
+              <option value="120"></option>
+              <option value="160"></option>
+              <option value="200"></option>
+            </datalist>
+          </div>
+        </section>
+
+        <section class="panel layers-panel">
+          <div class="panel-head">
+            <div class="panel-title">
+              <svg class="ico"><use href="#i-layers"></use></svg>
+              <span>图层</span>
+              <span class="count" id="layerCount">0</span>
+            </div>
+            <span class="panel-note">上层在前</span>
+          </div>
+          <div class="layers-hint">拖动图层可调整上下层级</div>
+          <div class="layers-list" id="layersList"></div>
+          <div class="layers-empty" id="layersEmpty">
+            <div class="empty-orb"><svg class="ico"><use href="#i-layers"></use></svg></div>
+            <strong>还没有图层</strong>
+            <span>从左侧素材库点击图片添加</span>
+          </div>
+          <div class="layers-footer">
+            <span><svg class="ico"><use href="#i-eye"></use></svg> 隐藏</span>
+            <span><svg class="ico"><use href="#i-lock"></use></svg> 锁定</span>
+            <span><svg class="ico"><use href="#i-trash"></use></svg> 删除</span>
+          </div>
+        </section>
+      </aside>
+    </div>
+  </div>
+
+  <input type="file" id="assetInput" accept="image/png,image/webp,image/svg+xml,image/gif,image/jpeg,image/avif" multiple hidden>
+  <input type="file" id="importInput" accept="application/json,.json" hidden>
+
+  <div class="modal preview-modal" id="previewModal" hidden>
+    <div class="preview-shell" role="dialog" aria-modal="true" aria-labelledby="previewTitle">
+      <header class="preview-head">
+        <div class="preview-heading">
+          <span class="eyebrow">页面预览</span>
+          <h2 id="previewTitle">页面</h2>
+        </div>
+        <div class="preview-head-actions">
+          <button class="btn btn-ghost" id="previewPngBtn" type="button">
+            <svg class="ico"><use href="#i-download"></use></svg>
+            <span>下载 PNG</span>
+          </button>
+          <button class="icon-btn" id="previewCloseBtn" type="button" title="关闭预览">
+            <svg class="ico"><use href="#i-close"></use></svg>
+          </button>
+        </div>
+      </header>
+      <div class="preview-body">
+        <button class="preview-nav prev" id="previewPrevBtn" type="button" title="上一页">
+          <svg class="ico"><use href="#i-chevron-left"></use></svg>
+        </button>
+        <div class="preview-stage-wrap" id="previewStageWrap">
+          <div class="preview-holder" id="previewHolder">
+            <div class="preview-canvas" id="previewCanvas"></div>
+          </div>
+        </div>
+        <button class="preview-nav next" id="previewNextBtn" type="button" title="下一页">
+          <svg class="ico"><use href="#i-chevron-right"></use></svg>
+        </button>
+      </div>
+      <footer class="preview-foot">
+        <span id="previewCounter">第 1 / 1 页</span>
+        <span class="preview-foot-tip">← → 切换页面 · Esc 关闭</span>
+      </footer>
+    </div>
+  </div>
+
+  <div class="modal help-modal" id="helpModal" hidden>
+    <div class="help-card" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+      <header class="help-head">
+        <div>
+          <span class="eyebrow">使用说明</span>
+          <h2 id="helpTitle">像搭积木一样完成排版</h2>
+        </div>
+        <button class="icon-btn" id="helpCloseBtn" type="button" title="关闭">
+          <svg class="ico"><use href="#i-close"></use></svg>
+        </button>
+      </header>
+      <div class="help-grid">
+        <section class="help-block">
+          <h3>基本流程</h3>
+          <ol>
+            <li>在左上角新建、切换或重命名页面。</li>
+            <li>上传透明图片到共用素材库，或点击顶部「文字」添加文字。</li>
+            <li>点击素材放入画布，直接拖动、缩放、旋转；双击文字可修改内容。</li>
+            <li>在右侧图层列表中拖动排序，或隐藏、锁定、删除。</li>
+          </ol>
+        </section>
+        <section class="help-block">
+          <h3>快捷键</h3>
+          <dl class="shortcut-list">
+            <div><dt>Ctrl + Z</dt><dd>撤销</dd></div>
+            <div><dt>Ctrl + Shift + Z</dt><dd>重做</dd></div>
+            <div><dt>Delete</dt><dd>删除选中图层</dd></div>
+            <div><dt>Esc</dt><dd>取消选择 / 关闭弹窗</dd></div>
+            <div><dt>Ctrl + 滚轮</dt><dd>缩放画布</dd></div>
+            <div><dt>Ctrl + S</dt><dd>立即保存</dd></div>
+          </dl>
+        </section>
+        <section class="help-block">
+          <h3>拖动小技巧</h3>
+          <p>拖动角点可自由缩放，按住 <kbd>Shift</kbd> 等比缩放。拖动上方圆点旋转，按住 <kbd>Shift</kbd> 以 15° 吸附。文字图层在右侧调整字体和字号；拖动文字角点会同步缩放字号。</p>
+        </section>
+        <section class="help-block">
+          <h3>数据在哪里</h3>
+          <p>通过 <strong>启动.bat</strong> 打开时，项目和素材自动保存在本文件夹的 <code>data/project.json</code>。多个浏览器窗口会定时同步最新内容。删除画布图层不会删除素材库原文件。</p>
+        </section>
+      </div>
+      <footer class="help-foot">
+        <span id="storageModeText">正在检测存储方式…</span>
+        <button class="btn btn-primary" id="helpDoneBtn" type="button">开始使用</button>
+      </footer>
+    </div>
+  </div>
+
+  <div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="false"></div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>

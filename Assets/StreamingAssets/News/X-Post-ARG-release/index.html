@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#000000">
+  <title>Post / X</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <button class="skip-link" type="button" data-action="skip">Skip to content</button>
+
+  <svg class="svg-sprite" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="icon-x" viewBox="0 0 24 24">
+      <path fill="currentColor" stroke="none" d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24h-6.657l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231 5.451-6.231Zm-1.161 17.52h1.833L7.084 4.126H5.117l11.966 15.644Z"/>
+    </symbol>
+    <symbol id="icon-home" viewBox="0 0 24 24">
+      <path d="M3 10.75 12 3l9 7.75V21a1 1 0 0 1-1 1h-5.25v-6.75h-5.5V22H4a1 1 0 0 1-1-1V10.75Z"/>
+    </symbol>
+    <symbol id="icon-search" viewBox="0 0 24 24">
+      <circle cx="10.75" cy="10.75" r="7.25"/>
+      <path d="m16.25 16.25 4.5 4.5"/>
+    </symbol>
+    <symbol id="icon-bell" viewBox="0 0 24 24">
+      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 8h18s-3-1-3-8"/>
+      <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+    </symbol>
+    <symbol id="icon-user-plus" viewBox="0 0 24 24">
+      <circle cx="9" cy="7" r="4"/>
+      <path d="M2.5 21v-2a6.5 6.5 0 0 1 13 0v2"/>
+      <path d="M19 8v6"/>
+      <path d="M16 11h6"/>
+    </symbol>
+    <symbol id="icon-message" viewBox="0 0 24 24">
+      <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5Z"/>
+    </symbol>
+    <symbol id="icon-phone" viewBox="0 0 24 24">
+      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92Z"/>
+    </symbol>
+    <symbol id="icon-sparkle" viewBox="0 0 24 24">
+      <path d="m12 3 1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3Z"/>
+      <path d="m19 15 .9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15Z"/>
+    </symbol>
+    <symbol id="icon-clock" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="9"/>
+      <path d="M12 7v5l3.25 2"/>
+    </symbol>
+    <symbol id="icon-star" viewBox="0 0 24 24">
+      <path d="m12 2.75 2.85 5.78 6.38.93-4.62 4.5 1.09 6.36L12 17.32l-5.7 3-1.09-6.36-4.62-4.5 6.38-.93L12 2.75Z"/>
+    </symbol>
+    <symbol id="icon-user" viewBox="0 0 24 24">
+      <circle cx="12" cy="7.5" r="4"/>
+      <path d="M4 21v-1.5a8 8 0 0 1 16 0V21"/>
+    </symbol>
+    <symbol id="icon-more" viewBox="0 0 24 24">
+      <circle cx="5" cy="12" r="1.8" fill="currentColor" stroke="none"/>
+      <circle cx="12" cy="12" r="1.8" fill="currentColor" stroke="none"/>
+      <circle cx="19" cy="12" r="1.8" fill="currentColor" stroke="none"/>
+    </symbol>
+    <symbol id="icon-back" viewBox="0 0 24 24">
+      <path d="M19 12H5"/>
+      <path d="m12 19-7-7 7-7"/>
+    </symbol>
+    <symbol id="icon-reply" viewBox="0 0 24 24">
+      <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5Z"/>
+    </symbol>
+    <symbol id="icon-repost" viewBox="0 0 24 24">
+      <path d="m17 1 4 4-4 4"/>
+      <path d="M3 11V9a4 4 0 0 1 4-4h14"/>
+      <path d="m7 23-4-4 4-4"/>
+      <path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+    </symbol>
+    <symbol id="icon-heart" viewBox="0 0 24 24">
+      <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78Z"/>
+    </symbol>
+    <symbol id="icon-bookmark" viewBox="0 0 24 24">
+      <path d="M19 21 12 16l-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16Z"/>
+    </symbol>
+    <symbol id="icon-share" viewBox="0 0 24 24">
+      <path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/>
+      <path d="m16 6-4-4-4 4"/>
+      <path d="M12 2v13"/>
+    </symbol>
+    <symbol id="icon-close" viewBox="0 0 24 24">
+      <path d="M18 6 6 18"/>
+      <path d="m6 6 12 12"/>
+    </symbol>
+    <symbol id="icon-link" viewBox="0 0 24 24">
+      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+    </symbol>
+    <symbol id="icon-mute" viewBox="0 0 24 24">
+      <path d="M11 5 6 9H2v6h4l5 4V5Z"/>
+      <path d="m22 9-6 6"/>
+      <path d="m16 9 6 6"/>
+    </symbol>
+    <symbol id="icon-block" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="9"/>
+      <path d="m5.64 5.64 12.72 12.72"/>
+    </symbol>
+    <symbol id="icon-flag" viewBox="0 0 24 24">
+      <path d="M4 22V4a2 2 0 0 1 2-2h9l2 3h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8l-2-3H4"/>
+    </symbol>
+    <symbol id="icon-plus" viewBox="0 0 24 24">
+      <path d="M12 5v14"/>
+      <path d="M5 12h14"/>
+    </symbol>
+    <symbol id="icon-info" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="9"/>
+      <path d="M12 11v5"/>
+      <circle cx="12" cy="8" r=".8" fill="currentColor" stroke="none"/>
+    </symbol>
+    <symbol id="icon-avatar" viewBox="0 0 48 48">
+      <circle cx="24" cy="18" r="8.5" fill="currentColor" stroke="none"/>
+      <path d="M7.5 48c0-9.1 7.4-16.5 16.5-16.5S40.5 38.9 40.5 48" fill="currentColor" stroke="none"/>
+    </symbol>
+  </svg>
+
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Primary navigation">
+      <div class="sidebar__inner">
+        <a class="brand" href="#/post" aria-label="X — Post">
+          <svg class="icon brand__icon" aria-hidden="true"><use href="#icon-x"></use></svg>
+        </a>
+
+        <nav class="nav" aria-label="Main navigation">
+          <a class="nav-item is-active" href="#/post" data-nav="home" aria-current="page">
+            <span class="nav-item__icon-wrap">
+              <svg class="icon" aria-hidden="true"><use href="#icon-home"></use></svg>
+            </span>
+            <span class="nav-item__label">Home</span>
+          </a>
+          <a class="nav-item" href="#/search" data-nav="explore">
+            <span class="nav-item__icon-wrap">
+              <svg class="icon" aria-hidden="true"><use href="#icon-search"></use></svg>
+            </span>
+            <span class="nav-item__label">Explore</span>
+          </a>
+          <a class="nav-item" href="#/unavailable/notifications" data-nav="notifications">
+            <span class="nav-item__icon-wrap">
+              <svg class="icon" aria-hidden="true"><use href="#icon-bell"></use></svg>
+              <span class="nav-item__badge" aria-label="1 notification">1</span>
+            </span>
+            <span class="nav-item__label">Notifications</span>
+          </a>
+          <a class="nav-item" href="#/unavailable/follow" data-nav="follow">
+            <span class="nav-item__icon-wrap">
+              <svg class="icon" aria-hidden="true"><use href="#icon-user-plus"></use></svg>
+            </span>
+            <span class="nav-item__label">Follow</span>
+          </a>
+          <a class="nav-item" href="#/unavailable/chat" data-nav="chat">
+            <span class="nav-item__icon-wrap">
+              <svg class="icon" aria-hidden="true"><use href="#icon-message"></use></svg>
+            </span>
+            <span class="nav-item__label">Chat</span>
+          </a>
+          <a class="nav-item" href="#/unavailable/calls" data-nav="calls">
+            <span class="nav-item__icon-wrap">
+              <svg class="icon" aria-hidden="true"><use href="#icon-phone"></use></svg>
+            </span>
+            <span class="nav-item__label">Calls</span>
+          </a>
+          <a class="nav-item" href="#/unavailable/grok" data-nav="grok">
+            <span class="nav-item__icon-wrap">
+              <svg class="icon" aria-hidden="true"><use href="#icon-sparkle"></use></svg>
+            </span>
+            <span class="nav-item__label">Grok</span>
+          </a>
+          <a class="nav-item" href="#/unavailable/history" data-nav="history">
+            <span class="nav-item__icon-wrap">
+              <svg class="icon" aria-hidden="true"><use href="#icon-clock"></use></svg>
+            </span>
+            <span class="nav-item__label">History</span>
+          </a>
+          <a class="nav-item" href="#/unavailable/premium" data-nav="premium">
+            <span class="nav-item__icon-wrap">
+              <svg class="icon" aria-hidden="true"><use href="#icon-star"></use></svg>
+            </span>
+            <span class="nav-item__label">Premium</span>
+          </a>
+          <a class="nav-item" href="#/post" data-nav="profile" data-profile-link>
+            <span class="nav-item__icon-wrap">
+              <svg class="icon" aria-hidden="true"><use href="#icon-user"></use></svg>
+            </span>
+            <span class="nav-item__label">Profile</span>
+          </a>
+          <a class="nav-item" href="#/unavailable/more" data-nav="more">
+            <span class="nav-item__icon-wrap">
+              <svg class="icon" aria-hidden="true"><use href="#icon-more"></use></svg>
+            </span>
+            <span class="nav-item__label">More</span>
+          </a>
+        </nav>
+
+        <button class="post-button" type="button" data-action="compose">
+          <svg class="icon post-button__icon" aria-hidden="true"><use href="#icon-plus"></use></svg>
+          <span class="post-button__label">Post</span>
+        </button>
+
+        <button class="account-chip" type="button" data-account-chip aria-label="View the current simulated profile">
+          <span class="avatar avatar--slate" aria-hidden="true">
+            <svg class="icon"><use href="#icon-avatar"></use></svg>
+          </span>
+          <span class="account-chip__meta">
+            <span class="account-chip__name">Account</span>
+            <span class="account-chip__handle">@…</span>
+          </span>
+          <svg class="icon account-chip__more" aria-hidden="true"><use href="#icon-more"></use></svg>
+        </button>
+      </div>
+    </aside>
+
+    <main class="main-column" id="main-content" tabindex="-1">
+      <div id="view-root"></div>
+      <noscript>
+        <div class="noscript">
+          <h1>JavaScript is required</h1>
+          <p>This simulated Post view loads its content with JavaScript. Please enable JavaScript and reload the page.</p>
+        </div>
+      </noscript>
+    </main>
+
+    <aside class="right-rail" aria-label="Search and relevant people">
+      <div class="right-rail__inner">
+        <form class="search" data-search-form role="search">
+          <svg class="icon search__icon" aria-hidden="true"><use href="#icon-search"></use></svg>
+          <label class="visually-hidden" for="search-input">Search</label>
+          <input id="search-input" name="q" type="search" placeholder="Search" autocomplete="off" enterkeyhint="search">
+        </form>
+
+        <section class="relevant-card" aria-labelledby="relevant-heading">
+          <h2 class="relevant-card__title" id="relevant-heading">Relevant people</h2>
+          <div id="relevant-list"></div>
+        </section>
+      </div>
+    </aside>
+  </div>
+
+  <div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Image preview" hidden>
+    <button class="lightbox__close icon-button" type="button" data-close-lightbox aria-label="Close image preview">
+      <svg class="icon" aria-hidden="true"><use href="#icon-close"></use></svg>
+    </button>
+    <img class="lightbox__image" id="lightbox-image" alt="">
+    <p class="lightbox__caption" id="lightbox-caption"></p>
+  </div>
+
+  <div class="modal-backdrop" id="feature-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="feature-title" aria-describedby="feature-body">
+      <button class="modal__close icon-button" type="button" data-close-modal aria-label="Close dialog">
+        <svg class="icon" aria-hidden="true"><use href="#icon-close"></use></svg>
+      </button>
+      <div class="modal__icon" id="feature-icon" aria-hidden="true"></div>
+      <h2 class="modal__title" id="feature-title"></h2>
+      <p class="modal__body" id="feature-body"></p>
+      <p class="modal__note" id="feature-note" hidden></p>
+      <div class="modal__actions">
+        <button class="button button--primary" type="button" data-close-modal>Got it</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="content.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

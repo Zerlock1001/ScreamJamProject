@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using ScreamJam.Audio;
 using ScreamJam.Debugging;
 using UnityEngine;
 using UnityEngine.Networking;
@@ -9,7 +10,7 @@ using UnityEngine.UI;
 
 /// <summary>
 /// 远行：播放 JourneyStart 后离开，途中把明信片发到手机。回来后说一句，不再展示带回了什么。
-/// 第一次离开 30 秒，之后每次多 1 分钟。
+/// 第一次离开 30 秒，第二次及以后每次 1 分钟。
 /// </summary>
 public class PetJourney : MonoBehaviour
 {
@@ -32,7 +33,7 @@ public class PetJourney : MonoBehaviour
     [SerializeField] Image moodFill;
     [SerializeField] float shrinkSeconds = 1.2f;
     [SerializeField] float firstTripSeconds = 30f;
-    [SerializeField] float extraSecondsPerTrip = 60f;
+    [SerializeField] float laterTripSeconds = 60f;
     [SerializeField] float moodRecoverSeconds = 60f;
     [SerializeField] float newsDelaySeconds = 15f;
     [SerializeField] string returnLine = "I'm back! I brought you quite a few photos. Remember to check your phone.";
@@ -45,7 +46,8 @@ public class PetJourney : MonoBehaviour
     public static bool SavesProgress => Instance != null && Instance.keepProgressBetweenLaunches;
     public int CompletedTrips => tripCount;
     public bool JourneyAvailable { get; private set; }
-    public bool PetBodyVisible => pet != null && pet.enabled && pet.gameObject.activeInHierarchy;
+    public bool PetBodyVisible => VisibleBody() != null && VisibleBody().enabled && VisibleBody().gameObject.activeInHierarchy;
+    public bool UsingFinalBody => finalForm;
     public float MoodNormalized => CurrentMood();
 
     Vector3 homeScale = Vector3.one;
@@ -57,6 +59,12 @@ public class PetJourney : MonoBehaviour
     bool away;
     bool returning;
     bool departing;
+    bool bodyExpected;
+    bool finalForm;
+    bool finalBodyShown = true;
+    SpriteRenderer finalBody;
+    SpriteRenderer[] finalParts;
+    float departUnlockAt;
     bool waitingForDialogue;
     bool homeScriptPending;
     bool arrivalLineQueued;
@@ -67,8 +75,9 @@ public class PetJourney : MonoBehaviour
     long thirdRestPendingFor;
     string thirdRestPending;
     Sprite friendSleeping;
+    GifClip morseGif;
+    GifClip puzzleGif;
     Sprite[] weirdSprites;
-    Sprite[] clueSprites;
     Sprite fourthBed;
     Sprite fourthMeeting;
     WebCamTexture fourthCamera;
@@ -135,7 +144,7 @@ public class PetJourney : MonoBehaviour
                 ArmReturnCountdown((float)remaining);
                 SetJourneyButtonVisible(false);
                 if (pet != null)
-                    pet.enabled = false;
+                    SetShown(false);
                 away = true;
             }
             else
@@ -148,6 +157,9 @@ public class PetJourney : MonoBehaviour
 
     void Start()
     {
+        if (PetStory.Current == PetStory.Phase.Final)
+            UseFinalCharacter();
+
         if (tripCount >= 1)
         {
             PetPhone.ShowButton();
@@ -199,6 +211,9 @@ public class PetJourney : MonoBehaviour
         TryShowThirdRestLine();
         TryShowFourthRestLine();
 
+        if (departing && departUnlockAt > 0f && Time.unscaledTime >= departUnlockAt)
+            departing = false;
+
         if (away && !returning)
         {
             if (returnCountdownArmed)
@@ -236,7 +251,7 @@ public class PetJourney : MonoBehaviour
 
         newsShown = true;
         SaveInt(NewsSeenKey, 1);
-        string name = PetDialogue.HasPlayerName ? PetDialogue.PlayerName : "there";
+        string name = PetStory.SpokenName("there");
         PetDialogue.SayOnce("Hi, " + name + ". I met a lot of friends while I was traveling. I really want to understand them more deeply!");
     }
 
@@ -246,6 +261,16 @@ public class PetJourney : MonoBehaviour
         if (System.IO.File.Exists(path))
             return new System.Uri(path).AbsoluteUri;
         return newsUrl;
+    }
+
+    string XPostUrl()
+    {
+        string path = System.IO.Path.Combine(Application.streamingAssetsPath, "News", "X-Post-ARG-release", "index.html");
+        if (!System.IO.File.Exists(path))
+            path = System.IO.Path.Combine(Application.dataPath, "News", "X-Post-ARG-release", "index.html");
+        if (System.IO.File.Exists(path))
+            return new System.Uri(path).AbsoluteUri;
+        return NewsPageUrl();
     }
 
     static long SecondsToTicks(float seconds)
@@ -265,6 +290,12 @@ public class PetJourney : MonoBehaviour
         if (away || returning || departing || !PetDialogue.HasPlayerName)
             return;
 
+        if (PetCampaign.Ensure().HasJoinedCult)
+        {
+            PetDialogue.Say("We don't need to limit you this way anymore.");
+            return;
+        }
+
         if (PetCampaign.BlocksJourney)
             return;
 
@@ -277,9 +308,12 @@ public class PetJourney : MonoBehaviour
         }
 
         StopRestNag();
-        float duration = Mathf.Max(1f, firstTripSeconds + tripCount * extraSecondsPerTrip);
+        bodyExpected = false;
+        float duration = Mathf.Max(1f, tripCount <= 0 ? firstTripSeconds : laterTripSeconds);
         if (PetCampaign.Ensure().HoldsSecondJourney && tripCount >= 2)
             tripCount = 2;
+        else if (PetCampaign.Ensure().HoldsFifthJourney && tripCount >= 5)
+            tripCount = 5;
         else
             tripCount++;
         SaveInt(TripCountKey, tripCount);
@@ -294,6 +328,7 @@ public class PetJourney : MonoBehaviour
             StopCoroutine(postcardRoutine);
         postcardRoutine = StartCoroutine(SendPostcards(duration));
         departing = true;
+        departUnlockAt = Time.unscaledTime + 2.5f;
         returning = false;
         PetCampaign.Ensure().OnTripStarted(tripCount, duration);
         browsingGallery = false;
@@ -348,6 +383,8 @@ public class PetJourney : MonoBehaviour
         PlayerPrefs.DeleteKey("PetCampaign.FeaturesUnlocked");
         PlayerPrefs.DeleteKey("PetCampaign.AwaitingAgree");
         PlayerPrefs.DeleteKey("PetCampaign.SecondAsks");
+        PlayerPrefs.DeleteKey("PetCampaign.CultJoined");
+        PlayerPrefs.DeleteKey("PetCampaign.MemberId");
         PlayerPrefs.DeleteKey("PetStory.ComputerName");
         PlayerPrefs.DeleteKey("PetDialogue.IntroSeen");
         PlayerPrefs.Save();
@@ -367,8 +404,83 @@ public class PetJourney : MonoBehaviour
 
     public void SetBodyVisible(bool visible)
     {
+        SetShown(visible);
+    }
+
+    public void UseFinalCharacter()
+    {
+        if (!finalForm)
+        {
+            GameObject found = FindSceneObject("Final");
+            if (found == null)
+                return;
+
+            found.SetActive(true);
+            finalBody = found.GetComponent<SpriteRenderer>();
+            if (finalBody == null)
+                return;
+
+            finalParts = found.GetComponentsInChildren<SpriteRenderer>(true);
+            finalForm = true;
+            finalBodyShown = !away && !departing && (pet == null || pet.enabled);
+            CapsuleMenu.UseBody(finalBody);
+            if (PetDialogue.Instance != null)
+                PetDialogue.Instance.FollowBody(found.transform);
+        }
+
+        if (pet != null)
+            pet.enabled = false;
+        SetFinalParts(finalBodyShown);
+    }
+
+    static GameObject FindSceneObject(string objectName)
+    {
+        Animator[] animators = Resources.FindObjectsOfTypeAll<Animator>();
+        for (int i = 0; i < animators.Length; i++)
+        {
+            Animator animator = animators[i];
+            if (animator == null || animator.gameObject.name != objectName)
+                continue;
+            if (!animator.gameObject.scene.IsValid())
+                continue;
+            return animator.gameObject;
+        }
+
+        return null;
+    }
+
+    SpriteRenderer VisibleBody()
+    {
+        if (finalForm && finalBody != null)
+            return finalBody;
+        return pet;
+    }
+
+    void SetShown(bool visible)
+    {
+        finalBodyShown = visible;
+        if (finalForm)
+        {
+            if (pet != null)
+                pet.enabled = false;
+            SetFinalParts(visible);
+            return;
+        }
+
         if (pet != null)
             pet.enabled = visible;
+    }
+
+    void SetFinalParts(bool visible)
+    {
+        if (finalParts == null)
+            return;
+
+        for (int i = 0; i < finalParts.Length; i++)
+        {
+            if (finalParts[i] != null)
+                finalParts[i].enabled = visible;
+        }
     }
 
     public void ShowCollections()
@@ -395,14 +507,15 @@ public class PetJourney : MonoBehaviour
 
     public bool HitsPet(Vector2 screenPoint)
     {
-        if (pet == null || !pet.enabled)
+        SpriteRenderer body = VisibleBody();
+        if (body == null || !body.enabled)
             return false;
 
         Camera cam = Camera.main;
         if (cam == null)
             return false;
 
-        Bounds bounds = pet.bounds;
+        Bounds bounds = body.bounds;
         float depth = Mathf.Abs(cam.transform.position.z - bounds.center.z);
         Vector3 world = cam.ScreenToWorldPoint(new Vector3(screenPoint.x, screenPoint.y, depth));
         return bounds.Contains(new Vector3(world.x, world.y, bounds.center.z));
@@ -447,17 +560,12 @@ public class PetJourney : MonoBehaviour
         }
 
         RecoverMood();
-        if (pet != null)
-        {
-            pet.enabled = true;
-            if (homeScale.sqrMagnitude > 0.0001f)
-                pet.transform.localScale = homeScale;
-        }
+        RevealBody();
 
         Animator animator = PetAnimator();
         if (animator != null)
         {
-            animator.Play("Idle", 0, 0f);
+            animator.Play(PetDialogue.BodyPose("Idle"), 0, 0f);
             animator.Update(0f);
         }
 
@@ -527,9 +635,7 @@ public class PetJourney : MonoBehaviour
             yield return ScalePet(CurrentScale(), Vector3.zero);
 
         if (pet != null)
-            pet.enabled = false;
-
-        departing = false;
+            SetShown(false);
         if (tripCount == 1)
             yield return IntroducePhone();
         else if (PetCampaign.Ensure().PlaysSecondScript(tripCount))
@@ -553,7 +659,7 @@ public class PetJourney : MonoBehaviour
             yield break;
 
         PetPhone.Instance.SetOpen(true);
-        string name = PetDialogue.HasPlayerName ? PetDialogue.PlayerName : "there";
+        string name = PetStory.SpokenName("there");
         PetPhone.Instance.AddMessage("Hi, " + name + ". If I run into anything interesting while I'm out, I'll send it to you through this. Remember to check.");
     }
 
@@ -564,18 +670,24 @@ public class PetJourney : MonoBehaviour
         PetCampaign.Ensure().FlushTripLines();
 
         if (pet != null)
-            pet.enabled = true;
+            SetShown(true);
 
-        if (PetAnimator() != null)
-            yield return PlayState("JourneyEnd");
-        else
-            yield return ScalePet(Vector3.zero, homeScale);
-
-        if (PetPhone.Instance != null)
-            PetPhone.Instance.SetAway(false);
-        returning = false;
-        SetJourneyButtonVisible(true);
-        arrivalLineQueued = false;
+        try
+        {
+            if (PetAnimator() != null)
+                yield return PlayState("JourneyEnd");
+            else
+                yield return ScalePet(Vector3.zero, HomeScale());
+        }
+        finally
+        {
+            RevealBody();
+            returning = false;
+            arrivalLineQueued = false;
+            if (PetPhone.Instance != null)
+                PetPhone.Instance.SetAway(false);
+            SetJourneyButtonVisible(true);
+        }
         if (tripCount <= 1 && PetDialogue.Instance != null)
         {
             waitingForDialogue = true;
@@ -606,28 +718,81 @@ public class PetJourney : MonoBehaviour
         if (animator == null)
             yield break;
 
+        // 缩放为 0 时默认剔除会让 JourneyEnd 的缩放曲线根本不采样。
+        animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+        animator.updateMode = AnimatorUpdateMode.UnscaledTime;
+
+        float length = Mathf.Max(ClipLength(animator, stateName), 0.05f);
+        float elapsed = 0f;
         animator.Play(stateName, 0, 0f);
         animator.Update(0f);
 
-        float length = ClipLength(animator, stateName);
-        float timeout = Mathf.Max(length, 0.05f) + 0.25f;
-        float elapsed = 0f;
-        bool seen = false;
-        while (elapsed < timeout)
+        while (elapsed < length)
         {
+            float normalized = Mathf.Clamp01(elapsed / length);
             AnimatorStateInfo info = animator.GetCurrentAnimatorStateInfo(0);
-            bool playing = info.IsName(stateName) && info.normalizedTime < 1f;
-            if (playing)
-                seen = true;
-            else if (seen)
-                break;
+            if (!info.IsName(stateName))
+                animator.Play(stateName, 0, normalized);
 
             yield return null;
             elapsed += Time.unscaledDeltaTime;
         }
 
-        animator.Play("Idle", 0, 0f);
+        animator.Play(stateName, 0, 1f);
         animator.Update(0f);
+
+        // 回来要停在 JourneyEnd 的最后一帧。Idle 没有缩放曲线，切过去就看不到回来。
+        if (stateName == "JourneyEnd")
+            yield break;
+
+        animator.Play(PetDialogue.BodyPose("Idle"), 0, 0f);
+        animator.Update(0f);
+    }
+
+    Vector3 HomeScale()
+    {
+        if (homeScale.sqrMagnitude < 0.0001f)
+            return new Vector3(0.5f, 0.5f, 0.5f);
+        return homeScale;
+    }
+
+    void ApplyHomeScale()
+    {
+        if (pet == null)
+            return;
+
+        pet.transform.localScale = HomeScale();
+        SetShown(true);
+    }
+
+    void RevealBody()
+    {
+        bodyExpected = true;
+        if (pet == null)
+            return;
+
+        SetShown(true);
+        if (!finalForm && pet.transform.localScale.sqrMagnitude < 0.0004f)
+            ApplyHomeScale();
+    }
+
+    void LateUpdate()
+    {
+        if (finalForm && pet != null && pet.enabled)
+            pet.enabled = false;
+
+        if (!bodyExpected || away || departing || returning || pet == null)
+            return;
+
+        if (finalForm)
+        {
+            if (finalBodyShown && finalBody != null && !finalBody.enabled)
+                SetFinalParts(true);
+            return;
+        }
+
+        if (!pet.enabled || pet.transform.localScale.sqrMagnitude < 0.0004f)
+            ApplyHomeScale();
     }
 
     static float ClipLength(Animator animator, string clipName)
@@ -683,6 +848,12 @@ public class PetJourney : MonoBehaviour
             yield break;
         }
 
+        if (tripCount == 5 && !PetCampaign.Ensure().PlaysSecondScript(tripCount))
+        {
+            yield return SendFifthJourney(duration);
+            yield break;
+        }
+
         bool firstTrip = tripCount <= 1;
         bool secondTrip = PetCampaign.Ensure().PlaysSecondScript(tripCount);
         Sprite[] cards = null;
@@ -702,7 +873,7 @@ public class PetJourney : MonoBehaviour
             yield break;
 
         int count = firstTrip || secondTrip ? 4 : Mathf.Max(1, Mathf.Min(memeCount, cards.Length));
-        string name = PetDialogue.HasPlayerName ? PetDialogue.PlayerName : "there";
+        string name = PetStory.SpokenName("there");
         int linkAt = -1;
         bool paperLink = false;
         if (firstTrip)
@@ -752,7 +923,7 @@ public class PetJourney : MonoBehaviour
                     PetPhone.Instance.AddLinkMessage(
                         "I saw a really interesting post.",
                         "Cosimo Lunus",
-                        NewsPageUrl());
+                        XPostUrl());
                 }
 
                 continue;
@@ -780,6 +951,7 @@ public class PetJourney : MonoBehaviour
     IEnumerator SendThirdJourney(float duration)
     {
         BeginThirdPlaceLookup();
+        LoadMorseGif();
         Sprite[] weird = LoadWeirdMemes();
         Sprite firstWeird;
         Sprite laterWeird;
@@ -793,7 +965,7 @@ public class PetJourney : MonoBehaviour
             yield break;
 
         RevealPhoneIfClosed();
-        const int count = 4;
+        const int count = 5;
         for (int i = 0; i < count; i++)
         {
             float sendAt = duration * (i + 1f) / (count + 1f);
@@ -802,7 +974,7 @@ public class PetJourney : MonoBehaviour
             if (!away)
                 yield break;
 
-            if (i == 1)
+            if (i == 2)
             {
                 while (away && !thirdPlaceReady)
                     yield return null;
@@ -820,9 +992,12 @@ public class PetJourney : MonoBehaviour
                     PetPhone.Instance.AddPostcard(firstWeird, PetStory.ApplyName("{name}, I think you'd be interested in this."));
                     break;
                 case 1:
-                    PetPhone.Instance.AddMessage("Are there any interesting sights in " + thirdPlace + "? I'll take a photo for you.");
+                    SendMorseGif();
                     break;
                 case 2:
+                    PetPhone.Instance.AddMessage("Are there any interesting sights in " + thirdPlace + "? I'll take a photo for you.");
+                    break;
+                case 3:
                     RememberMeme(sleeping);
                     PetPhone.Instance.AddPostcard(sleeping, "Haha, this friend of yours is sleeping so peacefully.");
                     break;
@@ -831,6 +1006,176 @@ public class PetJourney : MonoBehaviour
                     PetPhone.Instance.AddPostcard(laterWeird, PetStory.ApplyName("{name}, this looks like something your friend has been using lately."));
                     break;
             }
+        }
+    }
+
+    void SendMorseGif()
+    {
+        SendAnimatedGif(LoadMorseGif(), "edocesrom");
+    }
+
+    void SendAnimatedGif(GifClip clip, string caption)
+    {
+        if (PetPhone.Instance == null || string.IsNullOrEmpty(caption))
+            return;
+
+        if (clip == null)
+        {
+            PetPhone.Instance.AddMessage(caption);
+            return;
+        }
+
+        RememberMeme(clip.First);
+        PetPhone.Instance.AddPostcard(clip.First, caption, clip);
+    }
+
+    GifClip LoadMorseGif()
+    {
+        return LoadJourneyGif(ref morseGif, "yellatacat", "yellatacat.gif");
+    }
+
+    GifClip LoadPuzzleGif()
+    {
+        return LoadJourneyGif(ref puzzleGif, "brain", "brain.gif");
+    }
+
+    public GifClip PlaceholderGif()
+    {
+        return LoadPuzzleGif();
+    }
+
+    static GifClip LoadJourneyGif(ref GifClip cache, string resourceName, string fileName)
+    {
+        if (cache != null)
+            return cache;
+
+        byte[] bytes = null;
+        TextAsset asset = Resources.Load<TextAsset>(resourceName);
+        if (asset != null)
+            bytes = asset.bytes;
+        if (bytes == null || bytes.Length == 0)
+        {
+            string path = System.IO.Path.Combine(Application.dataPath, "ArtResources", "Gif", "gif", fileName);
+            if (System.IO.File.Exists(path))
+                bytes = System.IO.File.ReadAllBytes(path);
+        }
+
+        if (bytes == null || bytes.Length == 0)
+            return null;
+
+        cache = GifClip.Decode(bytes);
+        return cache;
+    }
+
+    IEnumerator SendFifthJourney(float duration)
+    {
+        bool mic = TryStartFifthRecording();
+        float started = Time.unscaledTime;
+        yield return null;
+        while (away && departing)
+            yield return null;
+        if (!away)
+            yield break;
+
+        RevealPhoneIfClosed();
+        string[] lines;
+        int noteAt;
+        int audioAt;
+        if (mic)
+        {
+            lines = new[]
+            {
+                "Maybe you could try to flesh out what I can do a little more.",
+                "Maybe there are some other friends in my forum?",
+                "My phone's network is acting up. I left you a message on the desktop.",
+                "Maybe you'd be interested in this conversation."
+            };
+            noteAt = 2;
+            audioAt = 3;
+        }
+        else
+        {
+            lines = new[]
+            {
+                "Oh, you don't even have a microphone. I wanted to chat with you.",
+                "Maybe you could try to flesh out what I can do a little more.",
+                "Maybe there are some other friends in my forum?",
+                "My phone's network is acting up. I left you a message on the desktop."
+            };
+            noteAt = 3;
+            audioAt = -1;
+        }
+
+        int count = lines.Length;
+        for (int i = 0; i < count; i++)
+        {
+            float sendAt = duration * (i + 1f) / (count + 1f);
+            while (away && Time.unscaledTime - started < sendAt)
+                yield return null;
+            if (!away)
+                yield break;
+
+            RevealPhoneIfClosed();
+            if (PetPhone.Instance == null)
+                continue;
+
+            if (i == noteAt)
+                WriteFifthNote();
+
+            if (i == audioAt)
+                PetPhone.Instance.AddAudioMessage(lines[i], "Play", PlayFifthRecording);
+            else
+                PetPhone.Instance.AddMessage(lines[i]);
+        }
+    }
+
+    static bool TryStartFifthRecording()
+    {
+        string[] devices;
+        try
+        {
+            devices = Microphone.devices;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+
+        if (devices == null || devices.Length == 0)
+            return false;
+
+        MicrophoneLevelService service = MicrophoneLevelService.Instance;
+        if (service != null && service.IsRunning && !service.IsRecording)
+            service.StartRecording(10f);
+        return true;
+    }
+
+    static void PlayFifthRecording()
+    {
+        MicrophoneLevelService service = MicrophoneLevelService.Instance;
+        if (service == null)
+            return;
+
+        string error;
+        service.TryPlayLastRecording(out error);
+    }
+
+    static void WriteFifthNote()
+    {
+        try
+        {
+            string dir = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+            if (string.IsNullOrEmpty(dir))
+                return;
+
+            System.IO.File.WriteAllText(
+                System.IO.Path.Combine(dir, "blinky-note.txt"),
+                "I want to see every (OMNIS) place in the world. Maybe the admin panel has other functions that can help me do that.\r\n");
+            DebugConsole.WriteLine("Left blinky-note.txt on the desktop.");
+        }
+        catch (Exception ex)
+        {
+            DebugConsole.WriteLine("Could not write blinky-note.txt: " + ex.Message);
         }
     }
 
@@ -843,6 +1188,7 @@ public class PetJourney : MonoBehaviour
         if (!away)
             yield break;
 
+        LoadPuzzleGif();
         RevealPhoneIfClosed();
         const int count = 4;
         for (int i = 0; i < count; i++)
@@ -863,7 +1209,7 @@ public class PetJourney : MonoBehaviour
             switch (i)
             {
                 case 0:
-                    SendFourthPicture(PickClueMeme(), "mljvdzsxccoh");
+                    SendAnimatedGif(LoadPuzzleGif(), "mljvdzsxccoh");
                     break;
                 case 1:
                     SendFourthPicture(LoadFourthBed(), "Looks like one of your friends had a fling.");
@@ -909,6 +1255,7 @@ public class PetJourney : MonoBehaviour
             if (camera != null && camera.width > 16 && camera.height > 16 && camera.didUpdateThisFrame)
             {
                 fourthCameraFrame = CopyCameraFrame(camera);
+                SavePlayerPhoto(fourthCameraFrame);
                 break;
             }
 
@@ -1021,6 +1368,26 @@ public class PetJourney : MonoBehaviour
         return Sprite.Create(texture, new Rect(0f, 0f, width, height), new Vector2(0.5f, 0.5f), 100f);
     }
 
+    public static string PlayerPhotoFile =>
+        System.IO.Path.Combine(Application.persistentDataPath, "BlinkyPlayerPhoto.png");
+
+    public static void SavePlayerPhoto(Sprite sprite)
+    {
+        if (sprite == null || sprite.texture == null)
+            return;
+
+        try
+        {
+            byte[] png = sprite.texture.EncodeToPNG();
+            if (png == null || png.Length == 0)
+                return;
+            System.IO.File.WriteAllBytes(PlayerPhotoFile, png);
+        }
+        catch (Exception)
+        {
+        }
+    }
+
     static void FlipCameraRows(Color32[] pixels, int width, int height)
     {
         for (int y = 0; y < height / 2; y++)
@@ -1034,120 +1401,6 @@ public class PetJourney : MonoBehaviour
                 pixels[bottom + x] = held;
             }
         }
-    }
-
-    Sprite PickClueMeme()
-    {
-        Sprite[] pool = LoadClueMemes();
-        if (pool == null || pool.Length == 0)
-            return null;
-        return pool[UnityEngine.Random.Range(0, pool.Length)];
-    }
-
-    Sprite[] LoadClueMemes()
-    {
-        if (clueSprites != null)
-            return clueSprites;
-
-        var loaded = new List<Sprite>();
-        AppendResourceSprites(loaded, "Clue");
-        AppendResourceSprites(loaded, "clue");
-        AppendResourceSprites(loaded, "Memes/Clue");
-        AppendResourceSprites(loaded, "memes/clue");
-        AppendResourceSprites(loaded, "memes/\u7ebf\u7d22");
-#if UNITY_EDITOR
-        AppendClueNamedSprites(loaded);
-#endif
-        if (loaded.Count == 0)
-            AppendOrdinaryMemes(loaded);
-
-        clueSprites = loaded.Count > 0 ? loaded.ToArray() : new Sprite[0];
-        return clueSprites;
-    }
-
-    static void AppendResourceSprites(List<Sprite> loaded, string resourcePath)
-    {
-        Sprite[] found = Resources.LoadAll<Sprite>(resourcePath);
-        if (found == null)
-            return;
-
-        for (int i = 0; i < found.Length; i++)
-        {
-            if (found[i] != null && !loaded.Contains(found[i]))
-                loaded.Add(found[i]);
-        }
-    }
-
-#if UNITY_EDITOR
-    static void AppendClueNamedSprites(List<Sprite> loaded)
-    {
-        string[] guids = UnityEditor.AssetDatabase.FindAssets("t:Sprite", new[] { "Assets" });
-        for (int i = 0; i < guids.Length; i++)
-        {
-            string path = UnityEditor.AssetDatabase.GUIDToAssetPath(guids[i]);
-            if (!PathIsClue(path))
-                continue;
-
-            Sprite sprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>(path);
-            if (sprite != null && !loaded.Contains(sprite))
-                loaded.Add(sprite);
-        }
-    }
-
-    static bool PathIsClue(string assetPath)
-    {
-        if (string.IsNullOrEmpty(assetPath))
-            return false;
-
-        string[] parts = assetPath.Split('/', '\\');
-        for (int i = 0; i < parts.Length; i++)
-        {
-            string part = System.IO.Path.GetFileNameWithoutExtension(parts[i]);
-            if (NameIsClue(part))
-                return true;
-        }
-
-        return false;
-    }
-#endif
-
-    static bool NameIsClue(string value)
-    {
-        if (string.IsNullOrEmpty(value))
-            return false;
-
-        return value.IndexOf("clue", StringComparison.OrdinalIgnoreCase) >= 0
-            || value.IndexOf("\u7ebf\u7d22") >= 0;
-    }
-
-    static void AppendOrdinaryMemes(List<Sprite> loaded)
-    {
-        OrdinaryMemeSet set = Resources.Load<OrdinaryMemeSet>("OrdinaryMemeSet");
-        if (set != null && set.memes != null)
-        {
-            for (int i = 0; i < set.memes.Length; i++)
-            {
-                if (set.memes[i] != null && !loaded.Contains(set.memes[i]))
-                    loaded.Add(set.memes[i]);
-            }
-        }
-
-#if UNITY_EDITOR
-        if (loaded.Count > 0)
-            return;
-
-        if (!UnityEditor.AssetDatabase.IsValidFolder("Assets/memes/Nomral-1"))
-            return;
-
-        string[] guids = UnityEditor.AssetDatabase.FindAssets("t:Sprite", new[] { "Assets/memes/Nomral-1" });
-        for (int i = 0; i < guids.Length; i++)
-        {
-            string path = UnityEditor.AssetDatabase.GUIDToAssetPath(guids[i]);
-            Sprite sprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>(path);
-            if (sprite != null && !loaded.Contains(sprite))
-                loaded.Add(sprite);
-        }
-#endif
     }
 
     Sprite LoadFourthBed()
@@ -1782,10 +2035,11 @@ public class PetJourney : MonoBehaviour
             return;
 
         bool openingReady = PetDialogue.Instance != null && PetDialogue.OpeningComplete;
+        SpriteRenderer body = VisibleBody();
         bool visible = openingReady
-            && pet != null
-            && pet.enabled
-            && pet.gameObject.activeInHierarchy;
+            && body != null
+            && body.enabled
+            && body.gameObject.activeInHierarchy;
         if (!visible)
         {
             if (moodWidget.gameObject.activeSelf)
@@ -1797,7 +2051,7 @@ public class PetJourney : MonoBehaviour
             moodWidget.gameObject.SetActive(true);
 
         float homeScaleX = homeScale.x > 0.0001f ? homeScale.x : 0.5f;
-        float scale = Mathf.Clamp01(pet.transform.localScale.x / homeScaleX);
+        float scale = finalForm ? 1f : Mathf.Clamp01(pet.transform.localScale.x / homeScaleX);
         moodWidget.localScale = Vector3.one * scale;
 
         Camera cam = Camera.main;
@@ -1806,7 +2060,7 @@ public class PetJourney : MonoBehaviour
         if (cam == null || canvasRect == null)
             return;
 
-        Bounds bounds = pet.bounds;
+        Bounds bounds = body.bounds;
         Vector3 world = new Vector3(bounds.center.x, bounds.min.y - 0.15f, bounds.center.z);
         Vector3 screen = cam.WorldToScreenPoint(world);
         if (screen.z < 0f)

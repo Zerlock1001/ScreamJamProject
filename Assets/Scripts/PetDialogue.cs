@@ -24,6 +24,7 @@ public class PetDialogue : MonoBehaviour
 
     static readonly Color StateIColor = new Color(0.36f, 0.20f, 0.18f, 1f);
     static readonly Color StateIIColor = new Color(0.20f, 0.24f, 0.40f, 1f);
+    public const string Status2Pose = "Status2";
     const float PetVisualScale = 0.85f;
 
     Camera cam;
@@ -76,6 +77,7 @@ public class PetDialogue : MonoBehaviour
     bool namePromptBusy;
     static Sprite promptPanelSprite;
     Transform headBubble;
+    Transform speechAnchor;
     Vector3 headLocalOffset;
     bool headPoseCached;
 
@@ -84,7 +86,13 @@ public class PetDialogue : MonoBehaviour
     public static bool OpeningComplete { get; private set; }
     public bool IsOpen => visible;
     public Transform PetRoot => petRoot;
-    public bool CanDragPet => petRoot != null && !namePromptBusy && !PetJourney.PetIsAway;
+    public bool CanDragPet => petRoot != null && !namePromptBusy && !PetJourney.PetIsAway
+        && (PetJourney.Instance == null || !PetJourney.Instance.UsingFinalBody);
+
+    public void FollowBody(Transform body)
+    {
+        speechAnchor = body;
+    }
 
     public static void Say(string text)
     {
@@ -329,7 +337,7 @@ public class PetDialogue : MonoBehaviour
         var animator = GetComponent<Animator>();
         if (animator != null && animator.runtimeAnimatorController != null)
         {
-            animator.Play("Idle", 0, 0f);
+            animator.Play(BodyPose("Idle"), 0, 0f);
             animator.Update(0f);
         }
 
@@ -370,7 +378,7 @@ public class PetDialogue : MonoBehaviour
         switch (openingBeat)
         {
             case OpeningBeat.Greet:
-                Show("Hello, " + PlayerName + ".");
+                Show("Hello, " + PetStory.SpokenName("there") + ".");
                 break;
             case OpeningBeat.Stay:
                 Show("I think I'll just stay here.");
@@ -385,7 +393,7 @@ public class PetDialogue : MonoBehaviour
                 {
                     string opening = IntroText(0);
                     if (string.IsNullOrEmpty(opening))
-                        opening = "Hello, " + PlayerName + ".";
+                        opening = "Hello, " + PetStory.SpokenName("there") + ".";
                     Show(opening);
                 }
                 break;
@@ -408,8 +416,8 @@ public class PetDialogue : MonoBehaviour
             headPoseCached = true;
         }
 
-        Vector3 scale = transform.lossyScale;
-        Vector3 pos = transform.position + Vector3.Scale(headLocalOffset, scale);
+        Transform anchor = speechAnchor != null ? speechAnchor : transform;
+        Vector3 pos = anchor.position + Vector3.Scale(headLocalOffset, transform.lossyScale);
         if (Time.unscaledTime < nudgeUntil)
             pos.x += Mathf.Sin(Time.unscaledTime * 42f) * 0.22f;
         headBubble.position = pos;
@@ -494,12 +502,12 @@ public class PetDialogue : MonoBehaviour
             if (PetJourney.Instance != null && PetJourney.Instance.CompletedTrips >= 1)
             {
                 SetOpening(OpeningBeat.None);
-                Show("Hello again, " + PlayerName + ".");
+                Show("Hello again, " + PetStory.SpokenName("there") + ".");
             }
             else
             {
                 SetOpening(OpeningBeat.Greet);
-                Show("Hello, " + PlayerName + ".");
+                Show("Hello, " + PetStory.SpokenName("there") + ".");
             }
             return;
         }
@@ -587,7 +595,7 @@ public class PetDialogue : MonoBehaviour
         if (index != 0)
             return line;
 
-        string name = PlayerName;
+        string name = PetStory.SpokenName("there");
         if (string.IsNullOrWhiteSpace(name))
             name = "there";
         if (!string.IsNullOrEmpty(line) && line.Contains("XX"))
@@ -745,7 +753,7 @@ public class PetDialogue : MonoBehaviour
         }
 
         SetOpening(OpeningBeat.Greet);
-        Show("Hello, " + PlayerName + ".");
+        Show("Hello, " + PetStory.SpokenName("there") + ".");
     }
 
     IEnumerator MovePetTo(Vector3 target, float duration)
@@ -1180,10 +1188,11 @@ public class PetDialogue : MonoBehaviour
         if (stateName == "JourneyEnd")
             yield break;
 
+        string idle = BodyPose("Idle");
         AnimatorStateInfo end = animator.GetCurrentAnimatorStateInfo(0);
-        if (!end.IsName("Idle"))
+        if (!end.IsName(idle))
         {
-            animator.Play("Idle", 0, 0f);
+            animator.Play(idle, 0, 0f);
             animator.Update(0f);
         }
     }
@@ -1217,8 +1226,27 @@ public class PetDialogue : MonoBehaviour
 
     static string TeachSendLine()
     {
-        string name = string.IsNullOrWhiteSpace(PlayerName) ? "there" : PlayerName;
+        string name = PetStory.SpokenName("there");
         return "Alright, " + name + ". It's time I showed you how to send me out to search for memes. Click me, then choose Journey from my menu, and I'll head out to look for memes.";
+    }
+
+    public static string BodyPose(string stateName)
+    {
+        if (PetStory.Current == PetStory.Phase.StateII
+            && (stateName == "Idle" || stateName == "Talking"))
+            return Status2Pose;
+        return stateName;
+    }
+
+    public static void UseStatus2()
+    {
+        if (Instance == null || PetStory.Current != PetStory.Phase.StateII)
+            return;
+
+        Instance.PlayPose(Status2Pose);
+        var animator = Instance.GetComponent<Animator>();
+        if (animator != null)
+            animator.Update(0f);
     }
 
     void HoldIdle()
@@ -1227,7 +1255,7 @@ public class PetDialogue : MonoBehaviour
         if (animator == null || animator.runtimeAnimatorController == null)
             return;
 
-        animator.Play("Idle", 0, 0f);
+        animator.Play(BodyPose("Idle"), 0, 0f);
         animator.Update(0f);
     }
 
@@ -1237,15 +1265,16 @@ public class PetDialogue : MonoBehaviour
         if (animator == null || animator.runtimeAnimatorController == null)
             return;
 
+        string pose = BodyPose(stateName);
         AnimatorStateInfo info = animator.GetCurrentAnimatorStateInfo(0);
-        if (info.IsName(stateName))
+        if (info.IsName(pose))
             return;
         if (info.IsName("JourneyStart"))
             return;
         if (info.IsName("JourneyEnd") && info.normalizedTime < 1f)
             return;
 
-        animator.Play(stateName, 0, 0f);
+        animator.Play(pose, 0, 0f);
     }
 
     static Font BuiltinFont()

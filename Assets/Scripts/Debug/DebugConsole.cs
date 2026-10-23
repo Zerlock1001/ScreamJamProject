@@ -71,9 +71,8 @@ namespace ScreamJam.Debugging
 
         private bool _previousCursorVisible;
         private CursorLockMode _previousCursorLock;
-        private float _ignoreToggleUntil;
-        private float _startupCloseUntil;
-        private bool _sawGameFocus;
+        private bool _toggleUnlocked;
+        private float _toggleUnlockAt;
 
         private Font _font;
         private GUIStyle _logStyle;
@@ -119,8 +118,7 @@ namespace ScreamJam.Debugging
             RegisterCommand("sweeper", "/sweeper", "Open the daily minesweeper mini game.", _ => DailyMiniGame.Trigger());
             RegisterCommand("quit", "/quit", "Quit the game.", _ => QuitGame());
             _open = false;
-            _ignoreToggleUntil = Time.unscaledTime + 1f;
-            _startupCloseUntil = _ignoreToggleUntil;
+            _toggleUnlocked = false;
             if (_uguiRoot != null)
                 _uguiRoot.SetActive(false);
         }
@@ -132,32 +130,30 @@ namespace ScreamJam.Debugging
 
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
-            _sawGameFocus = false;
-            float until = Time.unscaledTime + 1f;
-            if (until > _ignoreToggleUntil)
-                _ignoreToggleUntil = until;
-            if (until > _startupCloseUntil)
-                _startupCloseUntil = until;
+            _toggleUnlocked = false;
             CloseImmediate();
         }
 
-        private void OnApplicationFocus(bool hasFocus)
+        private void ConsiderToggleUnlock()
         {
-            if (!hasFocus)
+            // Clicks during load, including the editor focusing the game view, don't count.
+            if (_toggleUnlocked || Time.unscaledTime < 2f)
+                return;
+            if (!Input.GetMouseButtonDown(0))
                 return;
 
-            // Play mode and alt-tab deliver a stray `~` as the window gains focus.
-            // That was opening the console by itself at startup.
-            float block = _sawGameFocus ? 0.25f : 1f;
-            _sawGameFocus = true;
-            float until = Time.unscaledTime + block;
-            if (until > _ignoreToggleUntil)
-                _ignoreToggleUntil = until;
+            _toggleUnlocked = true;
+            _toggleUnlockAt = Time.unscaledTime;
         }
 
-        private bool ToggleBlocked()
+        // A saved game finishes loading later, so the stray `~` from focusing the
+        // window arrives after a short timer. Ignore that key until the player
+        // has clicked, and ignore it again for a moment after that click.
+        private bool AllowToggle()
         {
-            return Time.unscaledTime < _ignoreToggleUntil;
+            if (!_toggleUnlocked)
+                return false;
+            return Time.unscaledTime >= _toggleUnlockAt + 1.5f;
         }
 
         private void OnDestroy()
@@ -192,7 +188,8 @@ namespace ScreamJam.Debugging
 
         private void Update()
         {
-            if (Time.unscaledTime < _startupCloseUntil && _open)
+            ConsiderToggleUnlock();
+            if (!AllowToggle() && _open)
                 CloseImmediate();
 
             UpdateUguiConsole();
@@ -201,7 +198,7 @@ namespace ScreamJam.Debugging
             // OnGUI also checks this key, because a focused text field can
             // swallow the event in some situations. ToggleConsole de-dupes
             // the two paths so one key press always means one toggle.
-            if (!ToggleBlocked() && Input.GetKeyDown(KeyCode.BackQuote))
+            if (AllowToggle() && Input.GetKeyDown(KeyCode.BackQuote))
                 ToggleConsole();
 
             if (_open)
@@ -410,7 +407,7 @@ namespace ScreamJam.Debugging
                 return;
 
             // Catch `~` before the command text field can consume it.
-            if (!ToggleBlocked() &&
+            if (AllowToggle() &&
                 Event.current.type == EventType.KeyDown &&
                 Event.current.keyCode == KeyCode.BackQuote)
             {
@@ -621,6 +618,12 @@ namespace ScreamJam.Debugging
         private void ExecuteCommand(string raw)
         {
             AddCommandLine("> " + raw);
+
+            if (PetCampaign.IsCultCommand(raw))
+            {
+                PetCampaign.TryJoinCult();
+                return;
+            }
 
             string[] parts = raw.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length == 0)
