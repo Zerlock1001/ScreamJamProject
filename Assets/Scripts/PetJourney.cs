@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using ScreamJam.Audio;
 using ScreamJam.Debugging;
+using ScreamJam.Utility;
 using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.SceneManagement;
@@ -57,6 +58,9 @@ public class PetJourney : MonoBehaviour
             return body != null ? body.bounds.center : transform.position;
         }
     }
+    public static bool HasCameraPhoto =>
+        (Instance != null && Instance.fourthCameraFrame != null)
+        || System.IO.File.Exists(PlayerPhotoFile);
     public bool UsingFinalBody => finalForm;
     public float MoodNormalized => CurrentMood();
 
@@ -94,7 +98,6 @@ public class PetJourney : MonoBehaviour
     Sprite[] weirdSprites;
     Sprite fourthBed;
     Sprite fourthMeeting;
-    WebCamTexture fourthCamera;
     Sprite fourthCameraFrame;
     long fourthRestSpokenFor;
     long fourthRestPendingFor;
@@ -216,7 +219,6 @@ public class PetJourney : MonoBehaviour
 
     void OnDestroy()
     {
-        ReleaseFourthCamera();
         if (Instance == this)
             Instance = null;
     }
@@ -258,7 +260,6 @@ public class PetJourney : MonoBehaviour
                     StopCoroutine(postcardRoutine);
                     postcardRoutine = null;
                 }
-                ReleaseFourthCamera();
                 StartCoroutine(ReturnHome());
             }
         }
@@ -678,7 +679,6 @@ public class PetJourney : MonoBehaviour
     {
         StopAllCoroutines();
         postcardRoutine = null;
-        ReleaseFourthCamera();
         tripCount = Mathf.Max(0, count);
         SaveInt(TripCountKey, tripCount);
         away = false;
@@ -1392,10 +1392,7 @@ public class PetJourney : MonoBehaviour
             while (away && Time.unscaledTime - started < sendAt)
                 yield return null;
             if (!away)
-            {
-                ReleaseFourthCamera();
                 yield break;
-            }
 
             RevealPhoneIfClosed();
             if (PetPhone.Instance == null)
@@ -1436,153 +1433,61 @@ public class PetJourney : MonoBehaviour
 
     IEnumerator CaptureFourthCameraAttempt()
     {
-        if (!TryOpenFourthCamera())
-            yield break;
-
         yield return CaptureFourthCameraFrame();
     }
 
     IEnumerator CaptureFourthCameraFrame()
     {
-        float until = Time.unscaledTime + 3f;
-        while (away && fourthCamera != null && Time.unscaledTime < until)
-        {
-            WebCamTexture camera = fourthCamera;
-            if (camera != null && camera.width > 16 && camera.height > 16 && camera.didUpdateThisFrame)
-            {
-                fourthCameraFrame = CopyCameraFrame(camera);
-                if (fourthCameraFrame != null)
-                    SavePlayerPhoto(fourthCameraFrame);
-                break;
-            }
+        var result = new CameraCaptureResult();
+        yield return StartCoroutine(CameraCaptureService.Capture(
+            CameraCaptureService.DefaultCaptureDelaySeconds,
+            result));
 
-            yield return null;
+        if (result.Photo == null)
+        {
+            if (!string.IsNullOrEmpty(result.Error))
+                DebugConsole.WriteLine("Camera capture failed: " + result.Error);
+            yield break;
         }
 
-        ReleaseFourthCamera();
+        fourthCameraFrame = SpriteFromTexture(result.Photo);
+        if (fourthCameraFrame != null)
+            SavePlayerPhoto(fourthCameraFrame);
     }
 
     IEnumerator SendFourthCameraBeat()
     {
         if (fourthCameraFrame == null)
         {
-            if (!TryOpenFourthCamera())
+            yield return CaptureFourthCameraFrame();
+            if (fourthCameraFrame == null)
             {
                 if (away && PetPhone.Instance != null)
                     PetPhone.Instance.AddMessage("What a shame. You don't have a camera, and I wanted to take a picture of you.");
                 yield break;
             }
-
-            yield return CaptureFourthCameraFrame();
-        }
-        else
-        {
-            ReleaseFourthCamera();
         }
 
         if (!away || PetPhone.Instance == null)
             yield break;
 
         RevealPhoneIfClosed();
-        if (fourthCameraFrame != null)
-        {
-            RememberMeme(fourthCameraFrame, "__camera__");
-            PetPhone.Instance.AddPostcard(fourthCameraFrame, "Do you like the photo I took for you?");
-        }
-        else
-            PetPhone.Instance.AddMessage("What a shame. You don't have a camera, and I wanted to take a picture of you.");
+        RememberMeme(fourthCameraFrame, "__camera__");
+        PetPhone.Instance.AddPostcard(fourthCameraFrame, "Do you like the photo I took for you?");
     }
 
-    bool TryOpenFourthCamera()
+    static Sprite SpriteFromTexture(Texture2D texture)
     {
-        ReleaseFourthCamera();
-        fourthCameraFrame = null;
-
-        WebCamDevice[] devices;
-        try
-        {
-            devices = WebCamTexture.devices;
-        }
-        catch (Exception)
-        {
-            return false;
-        }
-
-        if (devices == null || devices.Length == 0)
-            return false;
-
-        string deviceName = null;
-        for (int i = 0; i < devices.Length; i++)
-        {
-            if (!string.IsNullOrEmpty(devices[i].name))
-            {
-                deviceName = devices[i].name;
-                break;
-            }
-        }
-
-        if (string.IsNullOrEmpty(deviceName))
-            return false;
-
-        WebCamTexture camera = null;
-        try
-        {
-            camera = new WebCamTexture(deviceName, 640, 480, 30);
-            camera.Play();
-        }
-        catch (Exception)
-        {
-            if (camera != null)
-                Destroy(camera);
-            return false;
-        }
-
-        fourthCamera = camera;
-        return camera != null;
-    }
-
-    void ReleaseFourthCamera()
-    {
-        WebCamTexture camera = fourthCamera;
-        fourthCamera = null;
-        if (camera == null)
-            return;
-
-        if (camera.isPlaying)
-            camera.Stop();
-        Destroy(camera);
-    }
-
-    static Sprite CopyCameraFrame(WebCamTexture camera)
-    {
-        if (camera == null)
+        if (texture == null)
             return null;
 
-        int width = camera.width;
-        int height = camera.height;
-        if (width <= 16 || height <= 16)
-            return null;
-
-        Color32[] pixels;
-        try
-        {
-            pixels = camera.GetPixels32();
-        }
-        catch (Exception)
-        {
-            return null;
-        }
-
-        if (pixels == null || pixels.Length < width * height)
-            return null;
-
-        if (camera.videoVerticallyMirrored)
-            FlipCameraRows(pixels, width, height);
-
-        var texture = new Texture2D(width, height, TextureFormat.RGBA32, false);
-        texture.SetPixels32(pixels);
-        texture.Apply(false, false);
-        return Sprite.Create(texture, new Rect(0f, 0f, width, height), new Vector2(0.5f, 0.5f), 100f);
+        var sprite = Sprite.Create(
+            texture,
+            new Rect(0f, 0f, texture.width, texture.height),
+            new Vector2(0.5f, 0.5f),
+            100f);
+        sprite.name = "BlinkyCameraPhoto";
+        return sprite;
     }
 
     public static string PlayerPhotoFile =>
@@ -1602,21 +1507,6 @@ public class PetJourney : MonoBehaviour
         }
         catch (Exception)
         {
-        }
-    }
-
-    static void FlipCameraRows(Color32[] pixels, int width, int height)
-    {
-        for (int y = 0; y < height / 2; y++)
-        {
-            int top = y * width;
-            int bottom = (height - 1 - y) * width;
-            for (int x = 0; x < width; x++)
-            {
-                Color32 held = pixels[top + x];
-                pixels[top + x] = pixels[bottom + x];
-                pixels[bottom + x] = held;
-            }
         }
     }
 

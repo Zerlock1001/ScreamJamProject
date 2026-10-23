@@ -29,6 +29,8 @@ namespace ScreamJam.Audio
         private const float MinDb = -80f;
         private const float MinBaselineRms = 1e-5f;
         private const int RollingCapacity = 128;
+        private const float MonitorVolume = 0.8f;
+        private const float MonitorLatencySeconds = 0.08f;
 
         public static MicrophoneLevelService Instance { get; private set; }
 
@@ -126,6 +128,9 @@ namespace ScreamJam.Audio
         private int _recordLastPosition;
         private AudioClip _lastRecordingClip;
         private AudioSource _playbackSource;
+        private AudioSource _monitorSource;
+        private bool _monitorRequested;
+        private bool _monitorActive;
 
         private readonly float[] _rollingValues = new float[RollingCapacity];
         private readonly float[] _rollingTimes = new float[RollingCapacity];
@@ -159,6 +164,8 @@ namespace ScreamJam.Audio
 
         private void Update()
         {
+            UpdateLiveMonitor();
+
             if (!IsRunning)
             {
                 if (Time.unscaledTime >= _nextRetryTime)
@@ -182,6 +189,7 @@ namespace ScreamJam.Audio
             if (Instance == this)
                 Instance = null;
 
+            StopLivePlayback();
             StopMicrophone();
             CancelRecording();
 
@@ -543,6 +551,102 @@ namespace ScreamJam.Audio
             _playbackSource.spatialBlend = 0f;
         }
 
+        public bool StartLivePlayback()
+        {
+            _monitorRequested = true;
+            UpdateLiveMonitor();
+            return _monitorActive;
+        }
+
+        public void StopLivePlayback()
+        {
+            _monitorRequested = false;
+            StopMonitorSource();
+        }
+
+        void UpdateLiveMonitor()
+        {
+            if (!_monitorRequested)
+                return;
+
+            if (!IsRunning || _clip == null || !HasSample)
+            {
+                StopMonitorSource();
+                return;
+            }
+
+            if (!_monitorActive)
+                StartMonitorSource();
+
+            if (_monitorActive)
+                SyncMonitor(false);
+        }
+
+        void StartMonitorSource()
+        {
+            if (_monitorSource == null)
+            {
+                _monitorSource = gameObject.AddComponent<AudioSource>();
+                _monitorSource.playOnAwake = false;
+                _monitorSource.loop = true;
+                _monitorSource.spatialBlend = 0f;
+                _monitorSource.volume = MonitorVolume;
+            }
+
+            _monitorSource.Stop();
+            _monitorSource.clip = _clip;
+            _monitorSource.loop = true;
+            _monitorSource.volume = MonitorVolume;
+            _monitorSource.Play();
+            _monitorActive = true;
+            SyncMonitor(true);
+        }
+
+        void SyncMonitor(bool force)
+        {
+            if (!_monitorActive || _monitorSource == null || _clip == null)
+                return;
+
+            int position = Microphone.GetPosition(DeviceName);
+            int samples = _clip.samples;
+            if (position <= 0 || samples <= 0)
+                return;
+
+            int latency = Mathf.Clamp(
+                Mathf.RoundToInt(_clip.frequency * MonitorLatencySeconds),
+                1,
+                Mathf.Max(1, samples / 2));
+            int target = position - latency;
+            if (target < 0)
+                target += samples;
+
+            if (force)
+            {
+                _monitorSource.timeSamples = target;
+                return;
+            }
+
+            int current = _monitorSource.timeSamples;
+            int difference = target - current;
+            if (difference > samples / 2)
+                difference -= samples;
+            else if (difference < -samples / 2)
+                difference += samples;
+
+            if (Mathf.Abs(difference) > Mathf.Max(256, samples / 20))
+                _monitorSource.timeSamples = target;
+        }
+
+        void StopMonitorSource()
+        {
+            _monitorActive = false;
+            if (_monitorSource == null)
+                return;
+
+            _monitorSource.Stop();
+            _monitorSource.clip = null;
+        }
+
         private bool TryLoadLastRecording(out string error)
         {
             error = null;
@@ -780,6 +884,8 @@ namespace ScreamJam.Audio
 
         private void StopMicrophone()
         {
+            StopMonitorSource();
+
             if (!string.IsNullOrEmpty(DeviceName))
             {
                 try

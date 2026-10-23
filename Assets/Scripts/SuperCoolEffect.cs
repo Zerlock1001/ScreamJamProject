@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
+using ScreamJam.Audio;
 using ScreamJam.Debugging;
 using ScreamJam.Utility;
 using UnityEngine;
@@ -101,6 +102,7 @@ public class SuperCoolEffect : MonoBehaviour
 
     GameObject overlayRoot;
     Texture2D screenshot;
+    WebCamTexture liveCamera;
     RawImage[] cells;
     Text[] terminalTexts;
     readonly List<int> flashIndices = new List<int>();
@@ -202,6 +204,10 @@ public class SuperCoolEffect : MonoBehaviour
                 yield break;
             }
 
+            if (PetJourney.HasCameraPhoto || CameraCaptureService.HasCapturedPhoto)
+                yield return PrepareLiveCamera();
+
+            StartLiveMicrophone();
             BuildOverlay();
             ApplyGlitch();
 
@@ -231,6 +237,73 @@ public class SuperCoolEffect : MonoBehaviour
         {
             Finish();
         }
+    }
+
+    IEnumerator PrepareLiveCamera()
+    {
+        if (!CameraCaptureService.TryStartLiveCamera(out liveCamera, out string error))
+        {
+            liveCamera = null;
+            if (!string.IsNullOrEmpty(error))
+                Debug.LogWarning("SuperCoolEffect live camera unavailable: " + error);
+            yield break;
+        }
+
+        bool gotFrame = false;
+        float deadline = Time.realtimeSinceStartup + 1f;
+        while (liveCamera != null && Time.realtimeSinceStartup < deadline)
+        {
+            if (liveCamera.width > 16 && liveCamera.didUpdateThisFrame)
+            {
+                gotFrame = true;
+                break;
+            }
+
+            yield return null;
+        }
+
+        if (liveCamera == null || !gotFrame)
+        {
+            Debug.LogWarning("SuperCoolEffect live camera produced no frame.");
+            StopLiveCamera();
+        }
+    }
+
+    void StopLiveCamera()
+    {
+        if (liveCamera == null)
+            return;
+
+        if (cells != null)
+        {
+            for (int i = 0; i < cells.Length; i++)
+            {
+                RawImage cell = cells[i];
+                if (cell != null && cell.texture == liveCamera)
+                {
+                    cell.texture = Texture2D.whiteTexture;
+                    cell.color = Color.black;
+                    cell.uvRect = new Rect(0f, 0f, 1f, 1f);
+                }
+            }
+        }
+
+        CameraCaptureService.ReleaseLiveCamera(liveCamera);
+        liveCamera = null;
+    }
+
+    void StartLiveMicrophone()
+    {
+        MicrophoneLevelService service = MicrophoneLevelService.Instance;
+        if (service != null)
+            service.StartLivePlayback();
+    }
+
+    void StopLiveMicrophone()
+    {
+        MicrophoneLevelService service = MicrophoneLevelService.Instance;
+        if (service != null)
+            service.StopLivePlayback();
     }
 
     void BuildOverlay()
@@ -363,6 +436,7 @@ public class SuperCoolEffect : MonoBehaviour
         int flashCount;
         int terminalCount;
         int pureColorCount;
+        int cameraCount;
         if (blackOverride >= 0f)
         {
             blackCount = Mathf.RoundToInt(activeCellCount * Mathf.Clamp01(blackOverride));
@@ -371,6 +445,9 @@ public class SuperCoolEffect : MonoBehaviour
             flashCount = Mathf.RoundToInt(otherCount * (0.1f / 0.7f));
             terminalCount = Mathf.RoundToInt(otherCount * (0.05f / 0.7f));
             pureColorCount = RandomRound(otherCount * (0.02f / 0.7f));
+            cameraCount = liveCamera != null
+                ? RandomRound(otherCount * (0.03f / 0.7f))
+                : 0;
         }
         else
         {
@@ -379,6 +456,9 @@ public class SuperCoolEffect : MonoBehaviour
             flashCount = Mathf.RoundToInt(activeCellCount * 0.1f);
             terminalCount = Mathf.RoundToInt(activeCellCount * 0.05f);
             pureColorCount = RandomRound(activeCellCount * 0.02f);
+            cameraCount = liveCamera != null
+                ? RandomRound(activeCellCount * 0.03f)
+                : 0;
         }
 
         int[] special = new int[activeCellCount];
@@ -398,6 +478,8 @@ public class SuperCoolEffect : MonoBehaviour
             special[order[specialIndex++]] = 4;
         for (int i = 0; i < pureColorCount; i++)
             special[order[specialIndex++]] = 5;
+        for (int i = 0; i < cameraCount; i++)
+            special[order[specialIndex++]] = 6;
 
         flashIndices.Clear();
         var sources = new List<int>(activeCellCount);
@@ -448,6 +530,16 @@ public class SuperCoolEffect : MonoBehaviour
                 cell.color = PureBlockColors[
                     UnityEngine.Random.Range(0, PureBlockColors.Length)];
                 cell.uvRect = new Rect(0f, 0f, 1f, 1f);
+                continue;
+            }
+
+            if (special[i] == 6 && liveCamera != null)
+            {
+                cell.texture = liveCamera;
+                cell.color = Color.white;
+                cell.uvRect = liveCamera.videoVerticallyMirrored
+                    ? new Rect(0f, 1f, 1f, -1f)
+                    : new Rect(0f, 0f, 1f, 1f);
                 continue;
             }
 
@@ -690,6 +782,9 @@ public class SuperCoolEffect : MonoBehaviour
             flashRoutine = null;
         }
 
+        StopLiveCamera();
+        StopLiveMicrophone();
+
         if (overlayRoot != null)
         {
             Destroy(overlayRoot);
@@ -742,6 +837,8 @@ public class SuperCoolEffect : MonoBehaviour
         Cursor.lockState = cursorPreviousLock;
         PetJourney.SetMoodBarVisible(true);
         RestorePhoneIcon();
+        StopLiveCamera();
+        StopLiveMicrophone();
 
         if (overlayRoot != null)
         {

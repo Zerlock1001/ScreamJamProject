@@ -23,26 +23,8 @@ namespace ScreamJam.Debugging
         private const int MaxMessageLength = 8000;
         private const string InputControlName = "DebugConsoleInput";
 
-        private const int CameraRequestedWidth = 1280;
-        private const int CameraRequestedHeight = 720;
-        private const int CameraRequestedFps = 30;
-        private const float CameraStartTimeoutSeconds = 8f;
-        private const float CameraFrameTimeoutSeconds = 3f;
-        private const int MotionGridWidth = 32;
-        private const int MotionGridHeight = 18;
-        private const float CameraFrameWaitTimeoutSeconds = 1f;
-
         /// <summary>Default delay between starting the camera and capturing, in seconds.</summary>
-        public static float CameraCaptureDelaySeconds = 2f;
-
-        /// <summary>Warm-up time after the first valid camera frame before taking the reference sample.</summary>
-        public static float CameraMotionWarmupSeconds = 1f;
-
-        /// <summary>Delay between the reference sample and the comparison sample, in seconds.</summary>
-        public static float CameraMotionCheckDelaySeconds = 0.3f;
-
-        /// <summary>Mean absolute luma difference (0-255) required to consider the camera live.</summary>
-        public static float CameraMotionThreshold = 0.5f;
+        public static float CameraCaptureDelaySeconds = CameraCaptureService.DefaultCaptureDelaySeconds;
 
         private static DebugConsole _instance;
         private static readonly ConcurrentQueue<LogEntry> Pending = new ConcurrentQueue<LogEntry>();
@@ -63,9 +45,6 @@ namespace ScreamJam.Debugging
         private float _lastToggleTime = -1f;
 
         private bool _cameraBusy;
-        private WebCamTexture _cameraTexture;
-        private Color32[] _cameraFrameBuffer;
-        private float[] _cameraMotionBaseline;
         private bool _showMicLevel;
         private MicrophoneLevelService.MicStartPhase _lastMicStartPhase = MicrophoneLevelService.MicStartPhase.Idle;
 
@@ -177,7 +156,6 @@ namespace ScreamJam.Debugging
                 Cursor.lockState = _previousCursorLock;
             }
 
-            StopCamera();
             DestroyAllImageEntries();
 
             if (_font != null)
@@ -827,182 +805,28 @@ namespace ScreamJam.Debugging
         private IEnumerator CameraCaptureRoutine(float delay)
         {
             AddCommandLine("Opening camera...");
+            var result = new CameraCaptureResult();
 
             try
             {
-                string device = PickCameraDevice();
-                if (string.IsNullOrEmpty(device))
-                {
-                    AddCommandLine("No camera found.", LogType.Error);
-                    yield break;
-                }
+                yield return StartCoroutine(CameraCaptureService.Capture(delay, result));
 
-                _cameraTexture = CreateCamera(device);
-                if (_cameraTexture == null)
-                {
-                    AddCommandLine("Failed to create camera.", LogType.Error);
-                    yield break;
-                }
-
-                if (!TryPlayCamera(_cameraTexture, out string playError))
-                {
-                    AddCommandLine("Failed to start camera: " + playError, LogType.Error);
-                    yield break;
-                }
-
-                AddCommandLine("Camera on. Capturing in " + delay.ToString("0.##", CultureInfo.InvariantCulture) + "s...");
-
-                float captureTime = Time.realtimeSinceStartup + delay;
-
-                float readyDeadline = Time.realtimeSinceStartup + CameraStartTimeoutSeconds;
-                while (_cameraTexture.width <= 16 || !_cameraTexture.didUpdateThisFrame)
-                {
-                    if (Time.realtimeSinceStartup > readyDeadline)
-                    {
-                        AddCommandLine("Camera failed to start (timeout).", LogType.Error);
-                        yield break;
-                    }
-
-                    yield return null;
-                }
-
-                int width = _cameraTexture.width;
-                int height = _cameraTexture.height;
-
-                if (_cameraFrameBuffer == null || _cameraFrameBuffer.Length != width * height)
-                    _cameraFrameBuffer = new Color32[width * height];
-
-                float warmup = Mathf.Clamp(CameraMotionWarmupSeconds, 0f, 10f);
-                float warmupEnd = Time.realtimeSinceStartup + warmup;
-                while (Time.realtimeSinceStartup < warmupEnd)
-                    yield return null;
-
-                bool gotReferenceFrame = false;
-                float referenceDeadline = Time.realtimeSinceStartup + CameraFrameWaitTimeoutSeconds;
-                while (Time.realtimeSinceStartup < referenceDeadline)
-                {
-                    if (_cameraTexture.didUpdateThisFrame)
-                    {
-                        gotReferenceFrame = true;
-                        break;
-                    }
-
-                    yield return null;
-                }
-
-                if (!gotReferenceFrame)
+                if (!result.Success)
                 {
                     AddCommandLine(
-                        "Camera invalid: no frame after " +
-                        warmup.ToString("0.##", CultureInfo.InvariantCulture) +
-                        "s warm-up (timeout " + CameraFrameWaitTimeoutSeconds.ToString("0.##", CultureInfo.InvariantCulture) + "s).",
+                        string.IsNullOrEmpty(result.Error) ? "Failed to capture photo." : result.Error,
                         LogType.Error);
-
-                    yield break;
-                }
-
-                if (!TryReadFrame(_cameraTexture, _cameraFrameBuffer, out string baselineError))
-                {
-                    AddCommandLine("Failed to read camera frame: " + baselineError, LogType.Error);
-                    yield break;
-                }
-
-                _cameraMotionBaseline = new float[MotionGridWidth * MotionGridHeight];
-                SampleLumaGrid(_cameraFrameBuffer, width, height, _cameraMotionBaseline);
-
-                float checkDelay = Mathf.Clamp(CameraMotionCheckDelaySeconds, 0.05f, 5f);
-                float motionThreshold = Mathf.Max(0.01f, CameraMotionThreshold);
-
-                // Compare the reference sample with a frame captured after the delay.
-                float checkTime = Time.realtimeSinceStartup + checkDelay;
-                while (Time.realtimeSinceStartup < checkTime)
-                    yield return null;
-
-                bool gotComparisonFrame = false;
-                float comparisonDeadline = Time.realtimeSinceStartup + CameraFrameWaitTimeoutSeconds;
-                while (Time.realtimeSinceStartup < comparisonDeadline)
-                {
-                    if (_cameraTexture.didUpdateThisFrame)
-                    {
-                        gotComparisonFrame = true;
-                        break;
-                    }
-
-                    yield return null;
-                }
-
-                if (!gotComparisonFrame)
-                {
-                    AddCommandLine(
-                        "Camera invalid: no new frame after " +
-                        checkDelay.ToString("0.##", CultureInfo.InvariantCulture) +
-                        "s (timeout " + CameraFrameWaitTimeoutSeconds.ToString("0.##", CultureInfo.InvariantCulture) + "s).",
-                        LogType.Error);
-
-                    yield break;
-                }
-
-                if (!TryReadFrame(_cameraTexture, _cameraFrameBuffer, out string sampleError))
-                {
-                    AddCommandLine("Failed to read camera frame: " + sampleError, LogType.Error);
-                    yield break;
-                }
-
-                float difference = ComputeLumaDifference(
-                    _cameraFrameBuffer,
-                    width,
-                    height,
-                    _cameraMotionBaseline);
-
-                if (difference < motionThreshold)
-                {
-                    AddCommandLine(
-                        "Camera invalid: no pixel change detected in " +
-                        checkDelay.ToString("0.##", CultureInfo.InvariantCulture) +
-                        "s (diff " + difference.ToString("0.###", CultureInfo.InvariantCulture) +
-                        ", threshold " + motionThreshold.ToString("0.###", CultureInfo.InvariantCulture) + ").",
-                        LogType.Error);
-
                     yield break;
                 }
 
                 AddCommandLine(
                     "Camera valid (pixel diff " +
-                    difference.ToString("0.###", CultureInfo.InvariantCulture) +
-                    ", threshold " + motionThreshold.ToString("0.###", CultureInfo.InvariantCulture) + ").");
+                    result.MotionDifference.ToString("0.###", CultureInfo.InvariantCulture) +
+                    ", threshold " +
+                    Mathf.Max(0.01f, CameraCaptureService.MotionThreshold).ToString("0.###", CultureInfo.InvariantCulture) +
+                    ").");
 
-                while (Time.realtimeSinceStartup < captureTime)
-                    yield return null;
-
-                bool freshFrame = false;
-                float frameDeadline = Time.realtimeSinceStartup + CameraFrameTimeoutSeconds;
-                while (Time.realtimeSinceStartup < frameDeadline)
-                {
-                    if (_cameraTexture.didUpdateThisFrame)
-                    {
-                        freshFrame = true;
-                        break;
-                    }
-
-                    yield return null;
-                }
-
-                if (!freshFrame)
-                {
-                    AddCommandLine("Camera stopped producing frames.", LogType.Error);
-                    yield break;
-                }
-
-                Texture2D photo = GrabFrame(_cameraTexture);
-                if (photo == null)
-                {
-                    AddCommandLine("Failed to capture photo.", LogType.Error);
-                    yield break;
-                }
-
-                byte[] png = EncodePhoto(photo);
-                Destroy(photo);
-
+                byte[] png = EncodePhoto(result.Photo);
                 if (png == null || png.Length == 0)
                 {
                     AddCommandLine("Failed to encode photo.", LogType.Error);
@@ -1016,29 +840,14 @@ namespace ScreamJam.Debugging
             }
             finally
             {
-                StopCamera();
-                _cameraFrameBuffer = null;
-                _cameraMotionBaseline = null;
+                if (result.Photo != null)
+                {
+                    Destroy(result.Photo);
+                    result.Photo = null;
+                }
+
                 _cameraBusy = false;
             }
-        }
-
-        private void StopCamera()
-        {
-            if (_cameraTexture == null)
-                return;
-
-            try
-            {
-                _cameraTexture.Stop();
-            }
-            catch
-            {
-                // Ignore shutdown errors from a removed/busy device.
-            }
-
-            Destroy(_cameraTexture);
-            _cameraTexture = null;
         }
 
         private static byte[] EncodePhoto(Texture2D texture)
@@ -1051,73 +860,6 @@ namespace ScreamJam.Debugging
             {
                 return null;
             }
-        }
-
-        private static bool TryReadFrame(WebCamTexture source, Color32[] buffer, out string error)
-        {
-            try
-            {
-                source.GetPixels32(buffer);
-                error = null;
-                return true;
-            }
-            catch (Exception ex)
-            {
-                error = ex.Message;
-                return false;
-            }
-        }
-
-        private static void SampleLumaGrid(Color32[] pixels, int width, int height, float[] target)
-        {
-            for (int gy = 0; gy < MotionGridHeight; gy++)
-            {
-                int y = MotionGridHeight <= 1
-                    ? 0
-                    : (gy * (height - 1)) / (MotionGridHeight - 1);
-
-                for (int gx = 0; gx < MotionGridWidth; gx++)
-                {
-                    int x = MotionGridWidth <= 1
-                        ? 0
-                        : (gx * (width - 1)) / (MotionGridWidth - 1);
-
-                    target[gy * MotionGridWidth + gx] = Luma(pixels[y * width + x]);
-                }
-            }
-        }
-
-        private static float ComputeLumaDifference(
-            Color32[] pixels,
-            int width,
-            int height,
-            float[] baseline)
-        {
-            float sum = 0f;
-
-            for (int gy = 0; gy < MotionGridHeight; gy++)
-            {
-                int y = MotionGridHeight <= 1
-                    ? 0
-                    : (gy * (height - 1)) / (MotionGridHeight - 1);
-
-                for (int gx = 0; gx < MotionGridWidth; gx++)
-                {
-                    int x = MotionGridWidth <= 1
-                        ? 0
-                        : (gx * (width - 1)) / (MotionGridWidth - 1);
-
-                    float difference = Luma(pixels[y * width + x]) - baseline[gy * MotionGridWidth + gx];
-                    sum += Mathf.Abs(difference);
-                }
-            }
-
-            return sum / (MotionGridWidth * MotionGridHeight);
-        }
-
-        private static float Luma(Color32 color)
-        {
-            return 0.299f * color.r + 0.587f * color.g + 0.114f * color.b;
         }
 
         private void ShowLastPhoto()
@@ -1465,102 +1207,6 @@ namespace ScreamJam.Debugging
             GUI.contentColor = color;
             GUILayout.Label(text, _logStyle);
             GUI.contentColor = previous;
-        }
-
-        private static string PickCameraDevice()
-        {
-            WebCamDevice[] devices = WebCamTexture.devices;
-            if (devices == null || devices.Length == 0)
-                return null;
-
-            for (int i = 0; i < devices.Length; i++)
-            {
-                string deviceName = devices[i].name;
-                if (string.IsNullOrEmpty(deviceName))
-                    continue;
-
-                if (deviceName.IndexOf("virtual", StringComparison.OrdinalIgnoreCase) >= 0)
-                    continue;
-
-                return deviceName;
-            }
-
-            return devices[0].name;
-        }
-
-        private static WebCamTexture CreateCamera(string deviceName)
-        {
-            try
-            {
-                return new WebCamTexture(
-                    deviceName,
-                    CameraRequestedWidth,
-                    CameraRequestedHeight,
-                    CameraRequestedFps);
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        private static bool TryPlayCamera(WebCamTexture camera, out string error)
-        {
-            try
-            {
-                camera.Play();
-                error = null;
-                return true;
-            }
-            catch (Exception ex)
-            {
-                error = ex.Message;
-                return false;
-            }
-        }
-
-        private static Texture2D GrabFrame(WebCamTexture source)
-        {
-            int width = source.width;
-            int height = source.height;
-
-            if (width <= 0 || height <= 0)
-                return null;
-
-            var pixels = new Color32[width * height];
-
-            try
-            {
-                source.GetPixels32(pixels);
-            }
-            catch
-            {
-                return null;
-            }
-
-            if (source.videoVerticallyMirrored)
-                FlipVertically(pixels, width, height);
-
-            var texture = new Texture2D(width, height, TextureFormat.RGB24, false);
-            texture.SetPixels32(pixels);
-            texture.Apply(false, false);
-            return texture;
-        }
-
-        private static void FlipVertically(Color32[] pixels, int width, int height)
-        {
-            for (int y = 0; y < height / 2; y++)
-            {
-                int top = y * width;
-                int bottom = (height - 1 - y) * width;
-
-                for (int x = 0; x < width; x++)
-                {
-                    Color32 temp = pixels[top + x];
-                    pixels[top + x] = pixels[bottom + x];
-                    pixels[bottom + x] = temp;
-                }
-            }
         }
 
         private static bool TrySavePhoto(byte[] png, out string error)
