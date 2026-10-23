@@ -1149,6 +1149,7 @@ public class PetDialogue : MonoBehaviour
     IEnumerator MoveToCorner()
     {
         yield return StartCoroutine(PlayClipAndWait("Enter"));
+        transform.localRotation = Quaternion.identity;
         OpeningComplete = true;
         SetOpening(OpeningBeat.Stay);
         Show("I think I'll just stay here.");
@@ -1202,6 +1203,9 @@ public class PetDialogue : MonoBehaviour
             animator.Play(stateName, 0, 1f);
             animator.Update(0f);
         }
+
+        if (stateName == "Enter")
+            transform.localRotation = Quaternion.identity;
 
         if (stateName == "JourneyEnd")
             yield break;

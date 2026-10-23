@@ -57,6 +57,7 @@ public class DailyMiniGame : MonoBehaviour
     const float StatusHeight = 52f;
     const float GridSize = 210f;
     const float ContentGap = 8f;
+    const string CompletedStateKey = "DailyMiniGame.CompletedState";
 
     static DailyMiniGame instance;
 
@@ -129,6 +130,21 @@ public class DailyMiniGame : MonoBehaviour
             return;
 
         instance.Dismiss();
+    }
+
+    public static void RestorePendingPassword()
+    {
+        Ensure();
+        if (instance == null)
+            return;
+
+        if (!instance.boardGenerated)
+            instance.NewRound();
+
+        if (instance.gameFinished)
+            instance.OpenWindow();
+        else
+            instance.ShowDailyPopup();
     }
 
     void Dismiss()
@@ -208,6 +224,7 @@ public class DailyMiniGame : MonoBehaviour
         BuildWindow(canvas);
         window.SetActive(false);
         popup.SetActive(false);
+        LoadCompletedState();
     }
 
     void BuildPopup(Transform canvas)
@@ -716,6 +733,9 @@ public class DailyMiniGame : MonoBehaviour
         revealedSafe = 0;
         explodedIndex = -1;
 
+        PlayerPrefs.DeleteKey(CompletedStateKey);
+        PlayerPrefs.Save();
+
         if (statusSmileyImage != null)
         {
             statusSmileyImage.sprite = ClassicSmileySprite();
@@ -949,6 +969,72 @@ public class DailyMiniGame : MonoBehaviour
                 flagged[i] = true;
                 flagsPlaced++;
             }
+        }
+
+        UpdateAllCells();
+        UpdateStatus();
+        RefreshPopupHoverPresentation();
+        SaveCompletedState();
+    }
+
+    void SaveCompletedState()
+    {
+        if (mines == null || mines.Length != Size * Size)
+            return;
+
+        var state = new char[Size * Size];
+        for (int i = 0; i < mines.Length; i++)
+            state[i] = mines[i] ? '1' : '0';
+
+        PlayerPrefs.SetString(CompletedStateKey, new string(state));
+        PlayerPrefs.Save();
+    }
+
+    void LoadCompletedState()
+    {
+        string state = PlayerPrefs.GetString(CompletedStateKey, string.Empty);
+        if (string.IsNullOrEmpty(state) || state.Length != Size * Size)
+            return;
+
+        mines = new bool[Size * Size];
+        int mineCount = 0;
+        for (int i = 0; i < state.Length; i++)
+        {
+            mines[i] = state[i] == '1';
+            if (mines[i])
+                mineCount++;
+        }
+
+        if (mineCount != MineCount)
+        {
+            PlayerPrefs.DeleteKey(CompletedStateKey);
+            PlayerPrefs.Save();
+            return;
+        }
+
+        adjacent = new int[Size * Size];
+        revealed = new bool[Size * Size];
+        flagged = new bool[Size * Size];
+        for (int i = 0; i < Size * Size; i++)
+        {
+            revealed[i] = !mines[i];
+            flagged[i] = mines[i];
+        }
+
+        ComputeAdjacent();
+        boardGenerated = true;
+        gameFinished = true;
+        gameLost = false;
+        inputLocked = true;
+        hasStarted = true;
+        flagsPlaced = MineCount;
+        revealedSafe = Size * Size - MineCount;
+        explodedIndex = -1;
+
+        if (statusSmileyImage != null)
+        {
+            statusSmileyImage.sprite = SmileySprite();
+            statusSmileyImage.color = Color.white;
         }
 
         UpdateAllCells();

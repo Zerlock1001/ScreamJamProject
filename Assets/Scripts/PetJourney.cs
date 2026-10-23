@@ -49,6 +49,14 @@ public class PetJourney : MonoBehaviour
     public int CompletedTrips => tripCount;
     public bool JourneyAvailable { get; private set; }
     public bool PetBodyVisible => VisibleBody() != null && VisibleBody().enabled && VisibleBody().gameObject.activeInHierarchy;
+    public Vector3 PetVisualCenter
+    {
+        get
+        {
+            SpriteRenderer body = VisibleBody();
+            return body != null ? body.bounds.center : transform.position;
+        }
+    }
     public bool UsingFinalBody => finalForm;
     public float MoodNormalized => CurrentMood();
 
@@ -407,6 +415,9 @@ public class PetJourney : MonoBehaviour
         PlayerPrefs.DeleteKey("PetCampaign.SecondAsks");
         PlayerPrefs.DeleteKey("PetCampaign.CultJoined");
         PlayerPrefs.DeleteKey("PetCampaign.MemberId");
+        PlayerPrefs.DeleteKey("DailyMiniGame.CompletedState");
+        PlayerPrefs.DeleteKey("AdminPanel.ColorSequence");
+        AdminPanel.ClearCachedSequence();
         PlayerPrefs.DeleteKey("PetStory.ComputerName");
         PlayerPrefs.DeleteKey("PetDialogue.IntroSeen");
         PlayerPrefs.Save();
