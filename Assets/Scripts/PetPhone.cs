@@ -26,6 +26,7 @@ public class PetPhone : MonoBehaviour
     int unreadCount;
     Coroutine phoneShakeRoutine;
     Text emptyChatText;
+    InputField chatInput;
     Button launcher;
     int pictureWindows;
     GameObject nameRow;
@@ -87,6 +88,8 @@ public class PetPhone : MonoBehaviour
             Instance = null;
     }
 
+
+
     public static void ShowButton()
     {
         Ensure();
@@ -94,8 +97,6 @@ public class PetPhone : MonoBehaviour
             return;
 
         Instance.ActivateHost();
-        if (Instance.phoneIcon != null)
-            Instance.phoneIcon.SetActive(true);
     }
 
     public void Toggle()
@@ -458,6 +459,104 @@ public class PetPhone : MonoBehaviour
         NotifyNewMessage();
     }
 
+    void SubmitChat(string raw)
+    {
+        string message = string.IsNullOrWhiteSpace(raw) ? string.Empty : raw.Trim();
+
+        if (chatInput != null)
+            chatInput.text = string.Empty;
+
+        if (string.IsNullOrEmpty(message))
+        {
+            if (chatInput != null)
+                chatInput.ActivateInputField();
+            return;
+        }
+
+        if (string.Equals(message, "/adminpanel start", StringComparison.OrdinalIgnoreCase))
+        {
+            AdminPanel.Open();
+            if (EventSystem.current != null)
+                EventSystem.current.SetSelectedGameObject(null);
+            return;
+        }
+
+        AddOutgoingMessage(message);
+
+        if (chatInput != null)
+            chatInput.ActivateInputField();
+    }
+
+    void AddOutgoingMessage(string text)
+    {
+        if (chatContent == null || string.IsNullOrEmpty(text))
+            return;
+
+        if (emptyChatText != null)
+            emptyChatText.gameObject.SetActive(false);
+
+        var label = CreateText("Label", transform, text, MessageFontSize, TextAnchor.UpperRight, new Color(0.20f, 0.10f, 0.06f, 1f));
+        label.horizontalOverflow = HorizontalWrapMode.Wrap;
+        label.verticalOverflow = VerticalWrapMode.Overflow;
+        float preferredTextWidth = PreferredTextWidth(label);
+        float bubbleWidth = Mathf.Clamp(preferredTextWidth + BubblePadX * 2f, 64f, BubbleWidth);
+        float textWidth = bubbleWidth - BubblePadX * 2f;
+        float bubbleHeight = PreferredTextHeight(label, textWidth) + BubblePadY * 2f;
+
+        float rowWidth = AvatarSize + RowGap + BubbleWidth;
+        var rowObject = new GameObject("SentRow", typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(LayoutElement));
+        rowObject.transform.SetParent(chatContent, false);
+        var row = rowObject.GetComponent<RectTransform>();
+        row.sizeDelta = new Vector2(rowWidth, Mathf.Max(AvatarSize, bubbleHeight));
+        var rowLayout = rowObject.GetComponent<LayoutElement>();
+        rowLayout.preferredWidth = rowWidth;
+        rowLayout.preferredHeight = Mathf.Max(AvatarSize, bubbleHeight);
+        var horizontal = rowObject.GetComponent<HorizontalLayoutGroup>();
+        horizontal.spacing = RowGap;
+        horizontal.childAlignment = TextAnchor.MiddleRight;
+        horizontal.childControlWidth = false;
+        horizontal.childControlHeight = false;
+        horizontal.childForceExpandWidth = false;
+        horizontal.childForceExpandHeight = false;
+
+        var bubble = new GameObject("Message", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(LayoutElement), typeof(Shadow));
+        bubble.transform.SetParent(row, false);
+        label.transform.SetParent(bubble.transform, false);
+        var image = bubble.GetComponent<Image>();
+        image.sprite = BubbleSprite();
+        image.type = Image.Type.Sliced;
+        image.color = new Color(0.96f, 0.59f, 0.40f, 1f);
+        image.raycastTarget = false;
+        var shadow = bubble.GetComponent<Shadow>();
+        shadow.effectColor = new Color(0f, 0f, 0f, 0.10f);
+        shadow.effectDistance = new Vector2(0f, -1.5f);
+        var bubbleRect = bubble.GetComponent<RectTransform>();
+        bubbleRect.sizeDelta = new Vector2(bubbleWidth, bubbleHeight);
+        var bubbleLayout = bubble.GetComponent<LayoutElement>();
+        bubbleLayout.preferredWidth = bubbleWidth;
+        bubbleLayout.preferredHeight = bubbleHeight;
+        bubbleLayout.minWidth = bubbleWidth;
+        bubbleLayout.minHeight = bubbleHeight;
+
+        var labelRect = label.rectTransform;
+        labelRect.anchorMin = Vector2.zero;
+        labelRect.anchorMax = Vector2.one;
+        labelRect.offsetMin = new Vector2(BubblePadX, BubblePadY);
+        labelRect.offsetMax = new Vector2(-BubblePadX, -BubblePadY);
+
+        CreatePlayerAvatar(row, AvatarSize);
+        StartCoroutine(ScrollToBottom());
+    }
+
+    static float PreferredTextWidth(Text label)
+    {
+        TextGenerationSettings settings = label.GetGenerationSettings(new Vector2(10000f, 10000f));
+        settings.horizontalOverflow = HorizontalWrapMode.Overflow;
+        settings.verticalOverflow = VerticalWrapMode.Overflow;
+        float unit = label.pixelsPerUnit > 0f ? label.pixelsPerUnit : 1f;
+        return label.cachedTextGeneratorForLayout.GetPreferredWidth(label.text, settings) / unit;
+    }
+
     static float PreferredTextHeight(Text label, float width)
     {
         TextGenerationSettings settings = label.GetGenerationSettings(new Vector2(width, 10000f));
@@ -514,6 +613,23 @@ public class PetPhone : MonoBehaviour
                 face.sprite = speaker.sprite;
         }
         Stretch(face.rectTransform, 2f);
+    }
+
+    void CreatePlayerAvatar(Transform parent, float size)
+    {
+        var avatarObject = new GameObject("PlayerAvatar", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(LayoutElement));
+        avatarObject.transform.SetParent(parent, false);
+        var image = avatarObject.GetComponent<Image>();
+        image.sprite = PlayerAvatarSprite();
+        image.preserveAspect = true;
+        image.raycastTarget = false;
+        var rect = avatarObject.GetComponent<RectTransform>();
+        rect.sizeDelta = new Vector2(size, size);
+        var layout = avatarObject.GetComponent<LayoutElement>();
+        layout.preferredWidth = size;
+        layout.preferredHeight = size;
+        layout.minWidth = size;
+        layout.minHeight = size;
     }
 
     IEnumerator ScrollToBottom()
@@ -629,7 +745,6 @@ public class PetPhone : MonoBehaviour
             typeof(RectTransform),
             typeof(CanvasRenderer),
             typeof(Image),
-            typeof(Button),
             typeof(Shadow));
         phoneIcon.transform.SetParent(canvas.transform, false);
         phoneIconRect = phoneIcon.GetComponent<RectTransform>();
@@ -637,7 +752,7 @@ public class PetPhone : MonoBehaviour
         phoneIconRect.anchorMax = new Vector2(1f, 0f);
         phoneIconRect.pivot = new Vector2(1f, 0f);
         phoneIconRect.anchoredPosition = new Vector2(-24f, 24f);
-        phoneIconRect.sizeDelta = new Vector2(54f, 81f);
+        phoneIconRect.sizeDelta = new Vector2(62.1f, 93.15f);
         phoneIconBasePosition = phoneIconRect.anchoredPosition;
 
         var body = phoneIcon.GetComponent<Image>();
@@ -651,11 +766,12 @@ public class PetPhone : MonoBehaviour
         shadow.effectColor = new Color(0f, 0f, 0f, 0.25f);
         shadow.effectDistance = new Vector2(0f, -3f);
 
-        var button = phoneIcon.GetComponent<Button>();
-        button.targetGraphic = body;
-        button.onClick.AddListener(Toggle);
-
         CreateUnreadBadge();
+
+        var drag = phoneIcon.AddComponent<PhoneIconDrag>();
+        drag.Phone = this;
+        drag.Target = phoneIconRect;
+
         phoneIcon.transform.SetAsLastSibling();
     }
 
@@ -668,7 +784,7 @@ public class PetPhone : MonoBehaviour
         rect.anchorMax = new Vector2(1f, 1f);
         rect.pivot = new Vector2(0.5f, 0.5f);
         rect.anchoredPosition = new Vector2(1f, 1f);
-        rect.sizeDelta = new Vector2(20f, 20f);
+        rect.sizeDelta = new Vector2(23f, 23f);
 
         var image = unreadBadge.GetComponent<Image>();
         image.sprite = BadgeSprite();
@@ -685,7 +801,7 @@ public class PetPhone : MonoBehaviour
         textRect.offsetMax = Vector2.zero;
         unreadBadgeText = textObject.GetComponent<Text>();
         unreadBadgeText.font = BuiltinFont();
-        unreadBadgeText.fontSize = 11;
+        unreadBadgeText.fontSize = 12;
         unreadBadgeText.fontStyle = FontStyle.Bold;
         unreadBadgeText.alignment = TextAnchor.MiddleCenter;
         unreadBadgeText.color = Color.white;
@@ -727,14 +843,23 @@ public class PetPhone : MonoBehaviour
 
     void StopIconShake()
     {
+        CancelIconShake();
+        if (phoneIconRect != null)
+            phoneIconRect.anchoredPosition = phoneIconBasePosition;
+    }
+
+    public void CancelIconShake()
+    {
         if (phoneShakeRoutine != null)
         {
             StopCoroutine(phoneShakeRoutine);
             phoneShakeRoutine = null;
         }
+    }
 
-        if (phoneIconRect != null)
-            phoneIconRect.anchoredPosition = phoneIconBasePosition;
+    public void SetIconBasePosition(Vector2 position)
+    {
+        phoneIconBasePosition = position;
     }
 
     IEnumerator ShakePhoneIcon()
@@ -885,6 +1010,62 @@ public class PetPhone : MonoBehaviour
         icon.raycastTarget = false;
         Stretch(icon.rectTransform, 7f);
 
+        var compose = new GameObject("Compose", typeof(RectTransform), typeof(LayoutElement));
+        compose.transform.SetParent(screen, false);
+        compose.GetComponent<LayoutElement>().preferredHeight = 50f;
+        var composeLayout = compose.AddComponent<HorizontalLayoutGroup>();
+        composeLayout.padding = new RectOffset(0, 0, 2, 2);
+        composeLayout.spacing = 6f;
+        composeLayout.childAlignment = TextAnchor.MiddleLeft;
+        composeLayout.childControlWidth = true;
+        composeLayout.childControlHeight = true;
+        composeLayout.childForceExpandWidth = false;
+        composeLayout.childForceExpandHeight = false;
+
+        var inputObject = new GameObject("ChatInput", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(InputField), typeof(LayoutElement));
+        inputObject.transform.SetParent(compose.transform, false);
+        var inputImage = inputObject.GetComponent<Image>();
+        inputImage.sprite = BubbleSprite();
+        inputImage.type = Image.Type.Sliced;
+        inputImage.color = new Color(0.98f, 0.98f, 0.99f, 1f);
+        inputImage.raycastTarget = true;
+        inputObject.GetComponent<LayoutElement>().flexibleWidth = 1f;
+        inputObject.GetComponent<LayoutElement>().preferredHeight = 36f;
+
+        var inputText = CreateText("Text", inputObject.transform, string.Empty, 14, TextAnchor.MiddleLeft, new Color(0.12f, 0.13f, 0.16f, 1f));
+        Stretch(inputText.rectTransform, 10f);
+        inputText.supportRichText = false;
+        var inputPlaceholder = CreateText("Placeholder", inputObject.transform, "Message Blinky...", 14, TextAnchor.MiddleLeft, new Color(0.48f, 0.47f, 0.45f, 1f));
+        Stretch(inputPlaceholder.rectTransform, 10f);
+        inputPlaceholder.fontStyle = FontStyle.Italic;
+
+        chatInput = inputObject.GetComponent<InputField>();
+        chatInput.targetGraphic = inputImage;
+        chatInput.textComponent = inputText;
+        chatInput.placeholder = inputPlaceholder;
+        chatInput.lineType = InputField.LineType.SingleLine;
+        chatInput.characterLimit = 200;
+        chatInput.caretColor = new Color(0.24f, 0.16f, 0.12f, 1f);
+        chatInput.selectionColor = new Color(0.93f, 0.55f, 0.42f, 0.35f);
+        chatInput.onSubmit.AddListener(SubmitChat);
+
+        var sendObject = new GameObject("Send", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button), typeof(LayoutElement));
+        sendObject.transform.SetParent(compose.transform, false);
+        var sendImage = sendObject.GetComponent<Image>();
+        sendImage.sprite = BubbleSprite();
+        sendImage.type = Image.Type.Sliced;
+        sendImage.color = new Color(0.93f, 0.55f, 0.42f, 1f);
+        sendImage.raycastTarget = true;
+        var sendLayout = sendObject.GetComponent<LayoutElement>();
+        sendLayout.preferredWidth = 60f;
+        sendLayout.preferredHeight = 36f;
+        var sendButton = sendObject.GetComponent<Button>();
+        sendButton.targetGraphic = sendImage;
+        sendButton.onClick.AddListener(() => SubmitChat(chatInput != null ? chatInput.text : string.Empty));
+        var sendLabel = CreateText("Label", sendObject.transform, "Send", 14, TextAnchor.MiddleCenter, new Color(0.24f, 0.14f, 0.10f, 1f));
+        Stretch(sendLabel.rectTransform, 0f);
+        sendLabel.fontStyle = FontStyle.Bold;
+
         CreateCloseButton(shell, () => SetOpen(false));
         shell.gameObject.AddComponent<WindowDrag>().Target = root;
         SetAway(false);
@@ -931,7 +1112,72 @@ public class PetPhone : MonoBehaviour
     static Sprite bubbleSprite;
     static Sprite pixelPhoneSprite;
     static Sprite badgeSprite;
+    static Sprite playerAvatarSprite;
     static Sprite pictureIcon;
+
+    static Sprite PlayerAvatarSprite()
+    {
+        if (playerAvatarSprite != null)
+            return playerAvatarSprite;
+
+        const int size = 24;
+        var texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        texture.filterMode = FilterMode.Point;
+        texture.wrapMode = TextureWrapMode.Clamp;
+        var pixels = new Color[size * size];
+        var clear = new Color(0f, 0f, 0f, 0f);
+        var back = new Color(0.20f, 0.52f, 0.78f, 1f);
+        var border = new Color(0.42f, 0.78f, 0.96f, 1f);
+        var skin = new Color(0.95f, 0.78f, 0.62f, 1f);
+        var hair = new Color(0.15f, 0.17f, 0.25f, 1f);
+        var shirt = new Color(0.90f, 0.92f, 0.96f, 1f);
+        var eye = new Color(0.10f, 0.12f, 0.18f, 1f);
+        float center = (size - 1) * 0.5f;
+
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                float dx = x - center;
+                float dy = y - center;
+                float distance = Mathf.Sqrt(dx * dx + dy * dy);
+                if (distance > 11.4f)
+                {
+                    pixels[y * size + x] = clear;
+                    continue;
+                }
+
+                Color color = distance > 10.2f ? border : back;
+
+                float headDx = x - 12f;
+                float headDy = y - 15f;
+                if (headDx * headDx + headDy * headDy <= 10.5f)
+                    color = skin;
+
+                if (y >= 16 && y <= 19 && x >= 8 && x <= 15)
+                    color = hair;
+
+                if ((x == 10 || x == 14) && y == 15)
+                    color = eye;
+
+                if (y <= 10 && y >= 5 && Mathf.Abs(x - center) <= (y - 3) * 0.9f)
+                    color = shirt;
+
+                pixels[y * size + x] = color;
+            }
+        }
+
+        texture.SetPixels(pixels);
+        texture.Apply(false, false);
+        texture.hideFlags = HideFlags.HideAndDontSave;
+        playerAvatarSprite = Sprite.Create(
+            texture,
+            new Rect(0f, 0f, size, size),
+            new Vector2(0.5f, 0.5f),
+            100f);
+        playerAvatarSprite.hideFlags = HideFlags.HideAndDontSave;
+        return playerAvatarSprite;
+    }
 
     static Sprite PixelPhoneSprite()
     {
@@ -1229,5 +1475,65 @@ public class WindowDrag : MonoBehaviour, IBeginDragHandler, IDragHandler
         if (scale < 0.01f)
             scale = 1f;
         Target.anchoredPosition += eventData.delta / scale;
+    }
+}
+
+public class PhoneIconDrag : MonoBehaviour, IPointerDownHandler, IPointerClickHandler, IBeginDragHandler, IDragHandler
+{
+    public PetPhone Phone;
+    public RectTransform Target;
+    bool dragged;
+
+    public void OnPointerDown(PointerEventData eventData)
+    {
+        dragged = false;
+    }
+
+    public void OnBeginDrag(PointerEventData eventData)
+    {
+        dragged = true;
+        if (Phone != null)
+            Phone.CancelIconShake();
+        if (Target != null)
+            Target.SetAsLastSibling();
+    }
+
+    public void OnDrag(PointerEventData eventData)
+    {
+        if (Target == null)
+            return;
+
+        Canvas canvas = Target.GetComponentInParent<Canvas>();
+        float scale = canvas != null ? canvas.scaleFactor : 1f;
+        if (scale < 0.01f)
+            scale = 1f;
+        Target.anchoredPosition += eventData.delta / scale;
+        ClampToCanvas(canvas);
+        if (Phone != null)
+            Phone.SetIconBasePosition(Target.anchoredPosition);
+    }
+
+    public void OnPointerClick(PointerEventData eventData)
+    {
+        if (!dragged && Phone != null)
+            Phone.Toggle();
+        dragged = false;
+    }
+
+    void ClampToCanvas(Canvas canvas)
+    {
+        if (canvas == null || Target == null)
+            return;
+
+        var canvasRect = canvas.transform as RectTransform;
+        if (canvasRect == null)
+            return;
+
+        Rect canvasBounds = canvasRect.rect;
+        Rect iconBounds = Target.rect;
+        Vector2 position = Target.anchoredPosition;
+        position.x = Mathf.Clamp(position.x, iconBounds.width - canvasBounds.width, 0f);
+        position.y = Mathf.Clamp(position.y, 0f, canvasBounds.height - iconBounds.height);
+        Target.anchoredPosition = position;
     }
 }

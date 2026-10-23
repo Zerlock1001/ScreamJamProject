@@ -43,6 +43,7 @@ public class PetJourney : MonoBehaviour
     public static bool SavesProgress => Instance != null && Instance.keepProgressBetweenLaunches;
     public int CompletedTrips => tripCount;
     public bool JourneyAvailable { get; private set; }
+    public bool PetBodyVisible => pet != null && pet.enabled && pet.gameObject.activeInHierarchy;
     public float MoodNormalized => CurrentMood();
 
     Vector3 homeScale = Vector3.one;

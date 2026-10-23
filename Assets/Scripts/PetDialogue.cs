@@ -24,6 +24,7 @@ public class PetDialogue : MonoBehaviour
 
     static readonly Color StateIColor = new Color(0.36f, 0.20f, 0.18f, 1f);
     static readonly Color StateIIColor = new Color(0.20f, 0.24f, 0.40f, 1f);
+    const float PetVisualScale = 0.85f;
 
     Camera cam;
     Font defaultFont;
@@ -221,6 +222,8 @@ public class PetDialogue : MonoBehaviour
         petRoot.localRotation = Quaternion.identity;
         petRoot.localScale = Vector3.one;
         transform.SetParent(petRoot, true);
+        // Blinky and the world-space dialogue bubble are 15% smaller.
+        petRoot.localScale = Vector3.one * PetVisualScale;
     }
 
     void OnDestroy()
