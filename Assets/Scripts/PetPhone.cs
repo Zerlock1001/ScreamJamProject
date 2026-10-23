@@ -41,6 +41,10 @@ public class PetPhone : MonoBehaviour
     RectTransform chatContent;
     GameObject visual;
     CanvasGroup phoneGroup;
+    readonly List<GameObject> pictureViewObjects = new List<GameObject>();
+    readonly List<GameObject> hiddenPictureViews = new List<GameObject>();
+    bool phoneUiHidden;
+    bool phoneVisualWasActive;
     GameObject phoneIcon;
     RectTransform phoneIconRect;
     GameObject unreadBadge;
@@ -89,6 +93,51 @@ public class PetPhone : MonoBehaviour
             return;
 
         Instance.phoneIcon.SetActive(visible);
+    }
+
+    public static void SetPhoneUiHidden(bool hidden)
+    {
+        if (Instance == null)
+            return;
+
+        Instance.SetPhoneUiHiddenInternal(hidden);
+    }
+
+    void SetPhoneUiHiddenInternal(bool hidden)
+    {
+        if (phoneUiHidden == hidden)
+            return;
+
+        phoneUiHidden = hidden;
+        if (hidden)
+        {
+            phoneVisualWasActive = visual != null && visual.activeSelf;
+            if (visual != null)
+                visual.SetActive(false);
+
+            hiddenPictureViews.Clear();
+            for (int i = 0; i < pictureViewObjects.Count; i++)
+            {
+                GameObject view = pictureViewObjects[i];
+                if (view == null || !view.activeSelf)
+                    continue;
+
+                hiddenPictureViews.Add(view);
+                view.SetActive(false);
+            }
+        }
+        else
+        {
+            if (visual != null)
+                visual.SetActive(phoneVisualWasActive);
+
+            for (int i = 0; i < hiddenPictureViews.Count; i++)
+            {
+                if (hiddenPictureViews[i] != null)
+                    hiddenPictureViews[i].SetActive(true);
+            }
+            hiddenPictureViews.Clear();
+        }
     }
 
     public static PetPhone Ensure()
@@ -1806,7 +1855,12 @@ public class PetPhone : MonoBehaviour
         if (animation != null && animation.Frames != null && animation.Frames.Length > 1)
             windowObject.AddComponent<GifPlayer>().Play(animation);
 
-        CreateCloseButton(window, () => Destroy(windowObject));
+        pictureViewObjects.Add(windowObject);
+        CreateCloseButton(window, () =>
+        {
+            pictureViewObjects.Remove(windowObject);
+            Destroy(windowObject);
+        });
         window.SetAsLastSibling();
     }
 

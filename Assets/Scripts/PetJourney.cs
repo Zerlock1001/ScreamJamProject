@@ -121,6 +121,9 @@ public class PetJourney : MonoBehaviour
     CanvasGroup galleryGroup;
     Coroutine galleryAnim;
     bool galleryClosing;
+    bool galleryUiHidden;
+    bool galleryWasActive;
+    bool memePopupWasActive;
     const float GalleryPageScale = 1.5f;
     const float GalleryDefaultWidth = 440f;
     const float GalleryDefaultHeight = 272f;
@@ -622,6 +625,39 @@ public class PetJourney : MonoBehaviour
         else
         {
             Instance.PlaceMoodWidget();
+        }
+    }
+
+    public static void SetGalleryHidden(bool hidden)
+    {
+        if (Instance == null)
+            return;
+
+        Instance.SetGalleryHiddenInternal(hidden);
+    }
+
+    void SetGalleryHiddenInternal(bool hidden)
+    {
+        if (galleryUiHidden == hidden)
+            return;
+
+        galleryUiHidden = hidden;
+        if (hidden)
+        {
+            galleryWasActive = galleryPanel != null && galleryPanel.activeSelf;
+            memePopupWasActive = memePopup != null && memePopup.activeSelf;
+
+            if (galleryPanel != null)
+                galleryPanel.SetActive(false);
+            if (memePopup != null)
+                memePopup.SetActive(false);
+        }
+        else
+        {
+            if (galleryPanel != null)
+                galleryPanel.SetActive(galleryWasActive);
+            if (memePopup != null)
+                memePopup.SetActive(memePopupWasActive);
         }
     }
 
@@ -1136,6 +1172,17 @@ public class PetJourney : MonoBehaviour
         Sprite sleeping = LoadFriendSleeping();
         float started = Time.unscaledTime;
         yield return null;
+
+        if (departing)
+        {
+            fourthCameraFrame = null;
+            yield return new WaitForSecondsRealtime(0.3f);
+            if (!away)
+                yield break;
+
+            yield return CaptureFourthCameraAttempt();
+        }
+
         while (away && departing)
             yield return null;
         if (!away)
@@ -1368,8 +1415,7 @@ public class PetJourney : MonoBehaviour
         float started = Time.unscaledTime;
         yield return null;
 
-        fourthCameraFrame = null;
-        if (departing)
+        if (departing && fourthCameraFrame == null)
         {
             yield return new WaitForSecondsRealtime(0.3f);
             if (!away)

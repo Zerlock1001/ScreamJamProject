@@ -174,6 +174,8 @@ public class SuperCoolEffect : MonoBehaviour
         phoneIconWasVisible = PetPhone.PhoneIconVisible;
         phoneIconSuppressed = true;
         PetPhone.SetPhoneIconVisible(false);
+        PetPhone.SetPhoneUiHidden(true);
+        PetJourney.SetGalleryHidden(true);
 
 #if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
         nativeCursorHidden = true;
@@ -810,7 +812,11 @@ public class SuperCoolEffect : MonoBehaviour
         Cursor.visible = cursorWasVisible;
         Cursor.lockState = cursorPreviousLock;
         PetJourney.SetMoodBarVisible(true);
+        PetPhone.SetPhoneUiHidden(false);
+        PetJourney.SetGalleryHidden(false);
         RestorePhoneIcon();
+        StopLiveCamera();
+        StopLiveMicrophone();
 
         Action done = onFinished;
         onFinished = null;
@@ -836,6 +842,8 @@ public class SuperCoolEffect : MonoBehaviour
         Cursor.visible = cursorWasVisible;
         Cursor.lockState = cursorPreviousLock;
         PetJourney.SetMoodBarVisible(true);
+        PetPhone.SetPhoneUiHidden(false);
+        PetJourney.SetGalleryHidden(false);
         RestorePhoneIcon();
         StopLiveCamera();
         StopLiveMicrophone();
