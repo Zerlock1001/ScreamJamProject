@@ -81,6 +81,8 @@ public class PetDialogue : MonoBehaviour
     Vector3 headLocalOffset;
     bool headPoseCached;
 
+    const string OpeningCompleteKey = "PetDialogue.OpeningComplete";
+
     public static string PlayerName { get; private set; }
     public static bool HasPlayerName => !string.IsNullOrEmpty(PlayerName);
     public static bool OpeningComplete { get; private set; }
@@ -289,6 +291,8 @@ public class PetDialogue : MonoBehaviour
         if (beat < 0 || beat > (int)OpeningBeat.Welcome)
             beat = (int)OpeningBeat.None;
         openingBeat = (OpeningBeat)beat;
+        OpeningComplete = HasPlayerName
+            && PlayerPrefs.GetInt(OpeningCompleteKey, 0) != 0;
         PetStory.LoadSaved();
     }
 
@@ -300,6 +304,7 @@ public class PetDialogue : MonoBehaviour
         if (HasPlayerName)
             PlayerPrefs.SetString("PetDialogue.PlayerName", PlayerName);
         PlayerPrefs.SetInt("PetDialogue.OpeningBeat", (int)openingBeat);
+        PlayerPrefs.SetInt(OpeningCompleteKey, OpeningComplete ? 1 : 0);
         PlayerPrefs.Save();
     }
 
@@ -312,6 +317,7 @@ public class PetDialogue : MonoBehaviour
     public static void ClearSession()
     {
         PlayerName = null;
+        OpeningComplete = false;
         if (Instance != null)
             Instance.openingBeat = OpeningBeat.None;
     }
@@ -324,10 +330,16 @@ public class PetDialogue : MonoBehaviour
             petRoot.localRotation = Quaternion.identity;
         }
 
-        bool atCorner = openingBeat != OpeningBeat.Greet
-            && openingBeat != OpeningBeat.AskName
-            && openingBeat != OpeningBeat.None
-            && openingBeat != OpeningBeat.Welcome;
+        bool completedOpening = OpeningComplete
+            || (PetJourney.Instance != null && PetJourney.Instance.CompletedTrips >= 1);
+        if (completedOpening)
+            openingBeat = OpeningBeat.None;
+
+        bool atCorner = completedOpening
+            || (openingBeat != OpeningBeat.Greet
+                && openingBeat != OpeningBeat.AskName
+                && openingBeat != OpeningBeat.None
+                && openingBeat != OpeningBeat.Welcome);
         transform.localPosition = atCorner ? new Vector3(6.6f, -3f, 0f) : Vector3.zero;
         transform.localRotation = Quaternion.identity;
         transform.localScale = new Vector3(0.5f, 0.5f, 0.5f);
@@ -366,37 +378,42 @@ public class PetDialogue : MonoBehaviour
         if (!HasPlayerName)
             yield break;
 
-        OpeningComplete = atCorner
-            || openingBeat == OpeningBeat.None
-            || openingBeat == OpeningBeat.Welcome;
-
-        if (openingBeat == OpeningBeat.AskName)
-            SetOpening(OpeningBeat.Greet);
-        else if (openingBeat == OpeningBeat.None && !continueFirstReturn && !PetJourney.PetIsAway)
-            SetOpening(OpeningBeat.Welcome);
-
-        switch (openingBeat)
+        if (completedOpening || atCorner)
         {
-            case OpeningBeat.Greet:
-                Show("Hello, " + PetStory.SpokenName("there") + ".");
-                break;
-            case OpeningBeat.Stay:
-                Show("I think I'll just stay here.");
-                break;
-            case OpeningBeat.TeachSend:
-            case OpeningBeat.TeachClick:
-                Show(TeachSendLine());
-                break;
-            case OpeningBeat.None:
-            case OpeningBeat.Welcome:
-                if (!continueFirstReturn && !PetJourney.PetIsAway)
-                {
-                    string opening = IntroText(0);
-                    if (string.IsNullOrEmpty(opening))
-                        opening = "Hello, " + PetStory.SpokenName("there") + ".";
-                    Show(opening);
-                }
-                break;
+            OpeningComplete = true;
+            SaveProgress();
+        }
+
+        if (!OpeningComplete)
+        {
+            if (openingBeat == OpeningBeat.AskName)
+                SetOpening(OpeningBeat.Greet);
+            else if (openingBeat == OpeningBeat.None && !continueFirstReturn && !PetJourney.PetIsAway)
+                SetOpening(OpeningBeat.Welcome);
+
+            switch (openingBeat)
+            {
+                case OpeningBeat.Greet:
+                    Show("Hello, " + PetStory.SpokenName("there") + ".");
+                    break;
+                case OpeningBeat.Stay:
+                    Show("I think I'll just stay here.");
+                    break;
+                case OpeningBeat.TeachSend:
+                case OpeningBeat.TeachClick:
+                    Show(TeachSendLine());
+                    break;
+                case OpeningBeat.None:
+                case OpeningBeat.Welcome:
+                    if (!continueFirstReturn && !PetJourney.PetIsAway)
+                    {
+                        string opening = IntroText(0);
+                        if (string.IsNullOrEmpty(opening))
+                            opening = "Hello, " + PetStory.SpokenName("there") + ".";
+                        Show(opening);
+                    }
+                    break;
+            }
         }
 
         if (continueFirstReturn)
@@ -746,6 +763,7 @@ public class PetDialogue : MonoBehaviour
         if (continued)
         {
             OpeningComplete = true;
+            SaveProgress();
             PetCampaign campaign = PetCampaign.Ensure();
             if (!campaign.HasIntroduced && !PetJourney.PetIsAway)
                 campaign.BeginAfterFirstReturn();

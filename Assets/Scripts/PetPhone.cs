@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -7,9 +8,31 @@ using UnityEngine.UI;
 /// <summary>
 /// 手机：可拖动的聊天窗口。点图片只打开这张图，右上角的 X 用来关闭。
 /// </summary>
+[DefaultExecutionOrder(-400)]
 public class PetPhone : MonoBehaviour
 {
     public static PetPhone Instance { get; private set; }
+
+    const string ChatHistoryKey = "PetPhone.ChatHistory";
+    const int MaxSavedChatEntries = 200;
+
+    [Serializable]
+    class ChatRecord
+    {
+        public int kind;
+        public string text;
+        public string linkLabel;
+        public string url;
+        public string playLabel;
+        public string spriteKey;
+        public string caption;
+    }
+
+    [Serializable]
+    class ChatHistoryData
+    {
+        public List<ChatRecord> entries = new List<ChatRecord>();
+    }
 
     RectTransform speechRoot;
     Text speechText;
@@ -34,6 +57,9 @@ public class PetPhone : MonoBehaviour
     Action<string> nameSubmitted;
     bool phoneOpen;
     Coroutine phoneAnimRoutine;
+    readonly List<ChatRecord> chatHistory = new List<ChatRecord>();
+    bool replayingHistory;
+    bool suppressHistory;
 
     const float PhoneWidth = 380f;
     const float PhoneHeight = 560f;
@@ -80,6 +106,11 @@ public class PetPhone : MonoBehaviour
 
         Instance = this;
         Build();
+    }
+
+    void Start()
+    {
+        LoadChatHistory();
     }
 
     void OnDestroy()
@@ -305,7 +336,9 @@ public class PetPhone : MonoBehaviour
     {
         ActivateHost();
         nameSubmitted = onSubmit;
+        suppressHistory = true;
         AddMessage("Please enter your username");
+        suppressHistory = false;
         if (speechText != null)
             speechText.gameObject.SetActive(false);
         if (nameRow == null)
@@ -355,6 +388,7 @@ public class PetPhone : MonoBehaviour
         if (chatContent == null || string.IsNullOrEmpty(text))
             return;
 
+        RecordChat(new ChatRecord { kind = 0, text = text });
         if (emptyChatText != null)
             emptyChatText.gameObject.SetActive(false);
 
@@ -393,12 +427,103 @@ public class PetPhone : MonoBehaviour
         NotifyNewMessage();
     }
 
+    void RecordChat(ChatRecord record)
+    {
+        if (record == null || replayingHistory || suppressHistory || !PetJourney.SavesProgress)
+            return;
+
+        chatHistory.Add(record);
+        if (chatHistory.Count > MaxSavedChatEntries)
+            chatHistory.RemoveRange(0, chatHistory.Count - MaxSavedChatEntries);
+        SaveChatHistory();
+    }
+
+    void SaveChatHistory()
+    {
+        if (!PetJourney.SavesProgress)
+            return;
+
+        var data = new ChatHistoryData { entries = chatHistory };
+        PlayerPrefs.SetString(ChatHistoryKey, JsonUtility.ToJson(data));
+        PlayerPrefs.Save();
+    }
+
+    void LoadChatHistory()
+    {
+        if (!PetJourney.SavesProgress || chatContent == null)
+            return;
+
+        string saved = PlayerPrefs.GetString(ChatHistoryKey, string.Empty);
+        if (string.IsNullOrEmpty(saved))
+            return;
+
+        ChatHistoryData data;
+        try
+        {
+            data = JsonUtility.FromJson<ChatHistoryData>(saved);
+        }
+        catch (Exception)
+        {
+            return;
+        }
+
+        if (data == null || data.entries == null || data.entries.Count == 0)
+            return;
+
+        replayingHistory = true;
+        chatHistory.Clear();
+        for (int i = 0; i < data.entries.Count; i++)
+        {
+            if (data.entries[i] != null)
+                chatHistory.Add(data.entries[i]);
+        }
+
+        for (int i = 0; i < data.entries.Count; i++)
+        {
+            ChatRecord record = data.entries[i];
+            if (record == null)
+                continue;
+
+            switch (record.kind)
+            {
+                case 0:
+                    AddMessage(record.text);
+                    break;
+                case 1:
+                    AddLinkMessage(record.text, record.linkLabel, record.url);
+                    break;
+                case 2:
+                    AddAudioMessage(record.text, record.playLabel, null);
+                    break;
+                case 3:
+                    Sprite sprite = PetJourney.ResolveSavedSprite(record.spriteKey);
+                    if (sprite != null)
+                        AddPostcard(sprite, record.caption);
+                    else if (!string.IsNullOrEmpty(record.caption))
+                        AddMessage(record.caption);
+                    break;
+                case 4:
+                    AddOutgoingMessage(record.text);
+                    break;
+            }
+        }
+        replayingHistory = false;
+        StartCoroutine(ScrollToBottom());
+    }
+
     public void AddLinkMessage(string text, string linkLabel, string url)
     {
         ActivateHost();
         if (chatContent == null || string.IsNullOrEmpty(text))
             return;
 
+        RecordChat(new ChatRecord
+        {
+            kind = 1,
+            text = text,
+            linkLabel = linkLabel,
+            url = url
+        });
         float textWidth = BubbleWidth - BubblePadX * 2f;
         var measure = CreateText("Measure", transform, text, MessageFontSize, TextAnchor.UpperLeft, Color.black);
         float textHeight = PreferredTextHeight(measure, textWidth);
@@ -493,6 +618,12 @@ public class PetPhone : MonoBehaviour
         if (chatContent == null || string.IsNullOrEmpty(text))
             return;
 
+        RecordChat(new ChatRecord
+        {
+            kind = 2,
+            text = text,
+            playLabel = playLabel
+        });
         float textWidth = BubbleWidth - BubblePadX * 2f;
         var measure = CreateText("Measure", transform, text, MessageFontSize, TextAnchor.UpperLeft, Color.black);
         float textHeight = PreferredTextHeight(measure, textWidth);
@@ -587,6 +718,16 @@ public class PetPhone : MonoBehaviour
             if (row.name != "PostcardRow")
                 continue;
 
+            for (int j = chatHistory.Count - 1; j >= 0; j--)
+            {
+                if (chatHistory[j].kind == 3)
+                {
+                    chatHistory.RemoveAt(j);
+                    SaveChatHistory();
+                    break;
+                }
+            }
+
             Destroy(row.gameObject);
             return;
         }
@@ -598,6 +739,12 @@ public class PetPhone : MonoBehaviour
         if (chatContent == null)
             return;
 
+        RecordChat(new ChatRecord
+        {
+            kind = 3,
+            spriteKey = PetJourney.SavedSpriteKey(picture),
+            caption = caption
+        });
         if (emptyChatText != null)
             emptyChatText.gameObject.SetActive(false);
 
@@ -715,6 +862,7 @@ public class PetPhone : MonoBehaviour
         if (chatContent == null || string.IsNullOrEmpty(text))
             return;
 
+        RecordChat(new ChatRecord { kind = 4, text = text });
         if (emptyChatText != null)
             emptyChatText.gameObject.SetActive(false);
 
@@ -1046,7 +1194,7 @@ public class PetPhone : MonoBehaviour
 
     void NotifyNewMessage()
     {
-        if (phoneOpen || phoneIcon == null || unreadBadge == null)
+        if (replayingHistory || phoneOpen || phoneIcon == null || unreadBadge == null)
             return;
 
         unreadCount++;

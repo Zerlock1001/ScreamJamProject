@@ -24,6 +24,7 @@ public class PetJourney : MonoBehaviour
     const string FourthRestSpokenKey = "PetJourney.FourthRestSpokenFor";
     const string NameKey = "PetDialogue.PlayerName";
     const string BeatKey = "PetDialogue.OpeningBeat";
+    const string CollectedMemesKey = "PetJourney.CollectedMemes";
     const string PhaseKey = "PetStory.Phase";
     const string IntroducedKey = "PetCampaign.Introduced";
     const string OfferKey = "PetCampaign.OfferUnlocked";
@@ -105,6 +106,7 @@ public class PetJourney : MonoBehaviour
     bool galleryClosing;
     const float GalleryPageScale = 1.5f;
     readonly List<Sprite> collectedMemes = new List<Sprite>();
+    readonly List<string> collectedMemeKeys = new List<string>();
     bool browsingGallery;
 
     void Awake()
@@ -121,6 +123,7 @@ public class PetJourney : MonoBehaviour
         DebugConsole.RegisterCommand("skipto", "/skipto X", "Set the number of completed journeys to X.", SkipToCommand);
         DebugConsole.RegisterCommand("recover", "/recover mood", "Fill the mood bar immediately.", RecoverMoodCommand);
         DebugConsole.RegisterCommand("remake", "/remake", "Erase the save and start the game over.", _ => Remake());
+        DebugConsole.RegisterCommand("sendpics", "/sendpics", "Send 10 random postcards and memes to the phone for testing.", _ => SendTestPictures());
 
         tripCount = LoadInt(TripCountKey);
         returnAtTicks = LoadTicks(ReturnAtKey);
@@ -130,6 +133,7 @@ public class PetJourney : MonoBehaviour
         fourthRestSpokenFor = LoadTicks(FourthRestSpokenKey);
         BindJourneyButton();
         BindGalleryButton();
+        LoadCollectedMemes();
         BindMoodBar();
         CreateMemePopup();
         CreateGallery();
@@ -377,6 +381,9 @@ public class PetJourney : MonoBehaviour
         PlayerPrefs.DeleteKey(FourthRestSpokenKey);
         PlayerPrefs.DeleteKey(NameKey);
         PlayerPrefs.DeleteKey(BeatKey);
+        PlayerPrefs.DeleteKey("PetDialogue.OpeningComplete");
+        PlayerPrefs.DeleteKey(CollectedMemesKey);
+        PlayerPrefs.DeleteKey("PetPhone.ChatHistory");
         PlayerPrefs.DeleteKey(PhaseKey);
         PlayerPrefs.DeleteKey(IntroducedKey);
         PlayerPrefs.DeleteKey(OfferKey);
@@ -948,6 +955,44 @@ public class PetJourney : MonoBehaviour
         }
     }
 
+    void SendTestPictures()
+    {
+        EnsureMemeSprites();
+        var pool = new List<Sprite>();
+        AppendUniqueSprites(pool, LoadPostCards());
+        AppendUniqueSprites(pool, memeSprites);
+        if (pool.Count == 0)
+        {
+            DebugConsole.WriteLine("No postcards or memes available.");
+            return;
+        }
+
+        PetPhone.Ensure();
+        if (PetPhone.Instance == null)
+        {
+            DebugConsole.WriteLine("Phone is not available.");
+            return;
+        }
+
+        Shuffle(pool);
+        int index = 0;
+        for (int i = 0; i < 10; i++)
+        {
+            if (index >= pool.Count)
+            {
+                Shuffle(pool);
+                index = 0;
+            }
+
+            Sprite sprite = pool[index++];
+            PetPhone.Instance.AddPostcard(sprite, "Test picture " + (i + 1));
+        }
+
+        PetPhone.Instance.SetOpen(true);
+        DebugConsole.WriteLine("Sent 10 random test pictures to the phone.");
+        DebugConsole.CloseConsole();
+    }
+
     IEnumerator SendThirdJourney(float duration)
     {
         BeginThirdPlaceLookup();
@@ -1011,10 +1056,10 @@ public class PetJourney : MonoBehaviour
 
     void SendMorseGif()
     {
-        SendAnimatedGif(LoadMorseGif(), "edocesrom");
+        SendAnimatedGif(LoadMorseGif(), "edocesrom", "__gif_morse__");
     }
 
-    void SendAnimatedGif(GifClip clip, string caption)
+    void SendAnimatedGif(GifClip clip, string caption, string collectionKey = null)
     {
         if (PetPhone.Instance == null || string.IsNullOrEmpty(caption))
             return;
@@ -1025,7 +1070,7 @@ public class PetJourney : MonoBehaviour
             return;
         }
 
-        RememberMeme(clip.First);
+        RememberMeme(clip.First, collectionKey);
         PetPhone.Instance.AddPostcard(clip.First, caption, clip);
     }
 
@@ -1209,7 +1254,7 @@ public class PetJourney : MonoBehaviour
             switch (i)
             {
                 case 0:
-                    SendAnimatedGif(LoadPuzzleGif(), "mljvdzsxccoh");
+                    SendAnimatedGif(LoadPuzzleGif(), "mljvdzsxccoh", "__gif_puzzle__");
                     break;
                 case 1:
                     SendFourthPicture(LoadFourthBed(), "Looks like one of your friends had a fling.");
@@ -1269,7 +1314,7 @@ public class PetJourney : MonoBehaviour
         RevealPhoneIfClosed();
         if (fourthCameraFrame != null)
         {
-            RememberMeme(fourthCameraFrame);
+            RememberMeme(fourthCameraFrame, "__camera__");
             PetPhone.Instance.AddPostcard(fourthCameraFrame, "Do you like the photo I took for you?");
         }
         else
@@ -1892,10 +1937,174 @@ public class PetJourney : MonoBehaviour
         SetJourneyButtonVisible(true);
     }
 
-    void RememberMeme(Sprite sprite)
+    void RememberMeme(Sprite sprite, string forcedKey = null)
     {
-        if (sprite != null && !collectedMemes.Contains(sprite))
+        if (sprite == null)
+            return;
+
+        if (!collectedMemes.Contains(sprite))
             collectedMemes.Add(sprite);
+
+        string key = string.IsNullOrEmpty(forcedKey) ? sprite.name : forcedKey;
+        if (!string.IsNullOrEmpty(key) && !collectedMemeKeys.Contains(key))
+        {
+            collectedMemeKeys.Add(key);
+            SaveCollectedMemes();
+        }
+    }
+
+    void SaveCollectedMemes()
+    {
+        if (!keepProgressBetweenLaunches)
+            return;
+
+        PlayerPrefs.SetString(CollectedMemesKey, string.Join("\n", collectedMemeKeys));
+        PlayerPrefs.Save();
+    }
+
+    void LoadCollectedMemes()
+    {
+        if (!keepProgressBetweenLaunches)
+            return;
+
+        collectedMemes.Clear();
+        collectedMemeKeys.Clear();
+        string saved = PlayerPrefs.GetString(CollectedMemesKey, string.Empty);
+        if (string.IsNullOrEmpty(saved))
+            return;
+
+        Dictionary<string, Sprite> lookup = BuildSavedSpriteLookup();
+        string[] keys = saved.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
+        for (int i = 0; i < keys.Length; i++)
+        {
+            string key = keys[i].Trim();
+            if (string.IsNullOrEmpty(key))
+                continue;
+
+            if (!collectedMemeKeys.Contains(key))
+                collectedMemeKeys.Add(key);
+
+            if (lookup.TryGetValue(key, out Sprite sprite)
+                && sprite != null
+                && !collectedMemes.Contains(sprite))
+            {
+                collectedMemes.Add(sprite);
+            }
+        }
+    }
+
+    Dictionary<string, Sprite> BuildSavedSpriteLookup()
+    {
+        var lookup = new Dictionary<string, Sprite>(StringComparer.Ordinal);
+        RegisterCollectionSprites(lookup, LoadPostCards());
+        EnsureMemeSprites();
+        RegisterCollectionSprites(lookup, memeSprites);
+        RegisterCollectionSprites(lookup, LoadWeirdMemes());
+
+        Sprite sleeping = LoadFriendSleeping();
+        if (sleeping != null)
+            RegisterCollectionSprite(lookup, sleeping.name, sleeping);
+        Sprite bed = LoadFourthBed();
+        if (bed != null)
+            RegisterCollectionSprite(lookup, bed.name, bed);
+        Sprite meeting = LoadFourthMeeting();
+        if (meeting != null)
+            RegisterCollectionSprite(lookup, meeting.name, meeting);
+
+        GifClip morse = LoadMorseGif();
+        if (morse != null && morse.First != null)
+            RegisterCollectionSprite(lookup, "__gif_morse__", morse.First);
+        GifClip puzzle = LoadPuzzleGif();
+        if (puzzle != null && puzzle.First != null)
+            RegisterCollectionSprite(lookup, "__gif_puzzle__", puzzle.First);
+
+        Sprite cameraPhoto = LoadSavedPlayerPhotoSprite();
+        if (cameraPhoto != null)
+            RegisterCollectionSprite(lookup, "__camera__", cameraPhoto);
+
+        return lookup;
+    }
+
+    static void RegisterCollectionSprites(Dictionary<string, Sprite> lookup, Sprite[] sprites)
+    {
+        if (sprites == null)
+            return;
+        for (int i = 0; i < sprites.Length; i++)
+        {
+            if (sprites[i] != null)
+                RegisterCollectionSprite(lookup, sprites[i].name, sprites[i]);
+        }
+    }
+
+    static void RegisterCollectionSprite(Dictionary<string, Sprite> lookup, string key, Sprite sprite)
+    {
+        if (!string.IsNullOrEmpty(key) && !lookup.ContainsKey(key))
+            lookup[key] = sprite;
+    }
+
+    public static string SavedSpriteKey(Sprite sprite)
+    {
+        if (sprite == null)
+            return string.Empty;
+
+        if (Instance != null)
+        {
+            if (sprite == Instance.fourthCameraFrame)
+                return "__camera__";
+
+            GifClip morse = Instance.LoadMorseGif();
+            if (morse != null && morse.First == sprite)
+                return "__gif_morse__";
+
+            GifClip puzzle = Instance.LoadPuzzleGif();
+            if (puzzle != null && puzzle.First == sprite)
+                return "__gif_puzzle__";
+        }
+
+        return string.IsNullOrEmpty(sprite.name) ? string.Empty : sprite.name;
+    }
+
+    public static Sprite ResolveSavedSprite(string key)
+    {
+        if (Instance == null || string.IsNullOrEmpty(key))
+            return null;
+
+        Dictionary<string, Sprite> lookup = Instance.BuildSavedSpriteLookup();
+        return lookup.TryGetValue(key, out Sprite sprite) ? sprite : null;
+    }
+
+    static Sprite LoadSavedPlayerPhotoSprite()
+    {
+        if (!System.IO.File.Exists(PlayerPhotoFile))
+            return null;
+
+        try
+        {
+            byte[] bytes = System.IO.File.ReadAllBytes(PlayerPhotoFile);
+            if (bytes == null || bytes.Length == 0)
+                return null;
+
+            var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+            if (!texture.LoadImage(bytes))
+            {
+                UnityEngine.Object.Destroy(texture);
+                return null;
+            }
+
+            texture.hideFlags = HideFlags.HideAndDontSave;
+            texture.filterMode = FilterMode.Bilinear;
+            var sprite = Sprite.Create(
+                texture,
+                new Rect(0f, 0f, texture.width, texture.height),
+                new Vector2(0.5f, 0.5f),
+                100f);
+            sprite.hideFlags = HideFlags.HideAndDontSave;
+            return sprite;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
     }
 
     float CurrentMood()
@@ -2209,6 +2418,28 @@ public class PetJourney : MonoBehaviour
         if (memeSprites != null)
             return;
 
+        var loaded = new List<Sprite>();
+        OrdinaryMemeSet set = Resources.Load<OrdinaryMemeSet>("OrdinaryMemeSet");
+        if (set != null && set.memes != null)
+        {
+            for (int i = 0; i < set.memes.Length; i++)
+            {
+                if (set.memes[i] != null)
+                    loaded.Add(set.memes[i]);
+            }
+        }
+
+#if UNITY_EDITOR
+        if (loaded.Count == 0)
+            AppendOrdinaryMemeFolder(loaded);
+#endif
+
+        if (loaded.Count > 0)
+        {
+            memeSprites = loaded.ToArray();
+            return;
+        }
+
         memeSprites = new Sprite[Mathf.Max(4, memeCount)];
         var colors = new[]
         {
@@ -2224,6 +2455,24 @@ public class PetJourney : MonoBehaviour
             memeSprites[i] = CreatePlaceholderSprite(color, i);
         }
     }
+
+#if UNITY_EDITOR
+    static void AppendOrdinaryMemeFolder(List<Sprite> loaded)
+    {
+        const string folder = "Assets/memes/Nomral-1";
+        if (!UnityEditor.AssetDatabase.IsValidFolder(folder))
+            return;
+
+        string[] guids = UnityEditor.AssetDatabase.FindAssets("t:Sprite", new[] { folder });
+        for (int i = 0; i < guids.Length; i++)
+        {
+            string path = UnityEditor.AssetDatabase.GUIDToAssetPath(guids[i]);
+            Sprite sprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>(path);
+            if (sprite != null)
+                loaded.Add(sprite);
+        }
+    }
+#endif
 
     static Sprite CreatePlaceholderSprite(Color color, int pattern)
     {
