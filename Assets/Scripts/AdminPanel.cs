@@ -42,6 +42,8 @@ public class AdminPanel : MonoBehaviour
     Text roleText;
     Text statusText;
     Text terminalText;
+    ScrollRect terminalScroll;
+    RectTransform terminalContent;
     Coroutine outputRoutine;
     Coroutine verifyRoutine;
     bool verifying;
@@ -236,11 +238,24 @@ public class AdminPanel : MonoBehaviour
             if (i > 0)
                 terminalText.text += "\n";
             terminalText.text += TerminalLines[i];
+            StartCoroutine(ScrollTerminalToBottom());
         }
 
         if (colorSequence != null && colorSequence.Length > 0)
             terminalText.text += "  " + ColorHintMarkup();
+        StartCoroutine(ScrollTerminalToBottom());
         outputRoutine = null;
+    }
+
+    IEnumerator ScrollTerminalToBottom()
+    {
+        yield return null;
+        if (terminalContent == null || terminalScroll == null)
+            yield break;
+
+        Canvas.ForceUpdateCanvases();
+        LayoutRebuilder.ForceRebuildLayoutImmediate(terminalContent);
+        terminalScroll.verticalNormalizedPosition = 0f;
     }
 
     void GenerateColorSequence()
@@ -311,6 +326,7 @@ public class AdminPanel : MonoBehaviour
             return;
 
         string entered = string.IsNullOrEmpty(raw) ? string.Empty : raw.Trim();
+        passwordInput.text = string.Empty;
         if (string.IsNullOrEmpty(entered))
         {
             passwordInput.ActivateInputField();
@@ -356,6 +372,7 @@ public class AdminPanel : MonoBehaviour
                     ? "<color=#2f8f57>[SUCCESS]</color> ACCESS GRANTED / " +
                       "<color=#2f8f57>WELCOME USER ADMIN_OcOm!</color>"
                     : "<color=#a33d3d>[WARN]</color> ACCESS DENIED");
+            StartCoroutine(ScrollTerminalToBottom());
         }
 
         verifying = false;
@@ -503,21 +520,68 @@ public class AdminPanel : MonoBehaviour
         terminalOutline.effectColor = new Color(0.72f, 0.72f, 0.74f, 0.26f);
         terminalOutline.effectDistance = new Vector2(1f, -1f);
 
-        terminalText = MakeText(
-            "Output",
-            terminal,
-            string.Empty,
-            12,
-            TextAnchor.UpperLeft,
-            TextColor);
+        var scrollObject = new GameObject("OutputScroll", typeof(RectTransform), typeof(ScrollRect));
+        scrollObject.transform.SetParent(terminal, false);
+        var scrollObjectRect = scrollObject.GetComponent<RectTransform>();
+        scrollObjectRect.anchorMin = Vector2.zero;
+        scrollObjectRect.anchorMax = Vector2.one;
+        scrollObjectRect.offsetMin = new Vector2(20f, 52f);
+        scrollObjectRect.offsetMax = new Vector2(-20f, -12f);
+
+        terminalScroll = scrollObject.GetComponent<ScrollRect>();
+        terminalScroll.horizontal = false;
+        terminalScroll.vertical = true;
+        terminalScroll.movementType = ScrollRect.MovementType.Clamped;
+        terminalScroll.scrollSensitivity = 30f;
+
+        var viewportObject = new GameObject(
+            "Viewport",
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(Image),
+            typeof(Mask));
+        viewportObject.transform.SetParent(scrollObject.transform, false);
+        var viewportRect = viewportObject.GetComponent<RectTransform>();
+        viewportRect.anchorMin = Vector2.zero;
+        viewportRect.anchorMax = Vector2.one;
+        viewportRect.offsetMin = Vector2.zero;
+        viewportRect.offsetMax = Vector2.zero;
+        var viewportImage = viewportObject.GetComponent<Image>();
+        viewportImage.color = new Color(0f, 0f, 0f, 0.001f);
+        viewportImage.raycastTarget = true;
+        viewportObject.GetComponent<Mask>().showMaskGraphic = false;
+
+        var contentObject = new GameObject(
+            "Content",
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(Text),
+            typeof(ContentSizeFitter));
+        contentObject.transform.SetParent(viewportObject.transform, false);
+        terminalContent = contentObject.GetComponent<RectTransform>();
+        terminalContent.anchorMin = new Vector2(0f, 1f);
+        terminalContent.anchorMax = new Vector2(1f, 1f);
+        terminalContent.pivot = new Vector2(0.5f, 1f);
+        terminalContent.anchoredPosition = Vector2.zero;
+        terminalContent.sizeDelta = Vector2.zero;
+
+        terminalText = contentObject.GetComponent<Text>();
+        terminalText.font = BuiltinFont();
+        terminalText.fontSize = 12;
+        terminalText.alignment = TextAnchor.UpperLeft;
+        terminalText.color = TextColor;
+        terminalText.horizontalOverflow = HorizontalWrapMode.Wrap;
+        terminalText.verticalOverflow = VerticalWrapMode.Overflow;
         terminalText.supportRichText = true;
         terminalText.lineSpacing = 1.4375f;
-        var terminalTextRect = terminalText.rectTransform;
-        terminalTextRect.anchorMin = Vector2.zero;
-        terminalTextRect.anchorMax = Vector2.one;
-        terminalTextRect.offsetMin = new Vector2(20f, 52f);
-        terminalTextRect.offsetMax = new Vector2(-20f, -12f);
         terminalText.raycastTarget = false;
+
+        var contentFitter = contentObject.GetComponent<ContentSizeFitter>();
+        contentFitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+        contentFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+        terminalScroll.viewport = viewportRect;
+        terminalScroll.content = terminalContent;
 
         var passwordObject = new GameObject("Password", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(InputField), typeof(Outline));
         passwordObject.transform.SetParent(terminal, false);
