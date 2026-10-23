@@ -295,10 +295,10 @@ public class PetPhone : MonoBehaviour
         if (statusText == null)
             return;
 
-        statusText.text = away ? "Blinky · Away" : "Blinky · Online";
+        statusText.text = away ? "Blinky · Online" : "Blinky · Away";
         statusText.color = away
-            ? new Color(0.62f, 0.36f, 0.16f, 1f)
-            : new Color(0.22f, 0.42f, 0.28f, 1f);
+            ? new Color(0.22f, 0.42f, 0.28f, 1f)
+            : new Color(0.62f, 0.36f, 0.16f, 1f);
     }
 
     public void BeginNameEntry(Action<string> onSubmit)
@@ -1047,7 +1047,7 @@ public class PetPhone : MonoBehaviour
         titleLayout.childForceExpandHeight = false;
         titleBar.gameObject.AddComponent<WindowDrag>().Target = root;
 
-        statusText = CreateText("Status", titleBar, "Blinky · Online", 12, TextAnchor.MiddleCenter, new Color(0.22f, 0.42f, 0.28f, 1f));
+        statusText = CreateText("Status", titleBar, "Blinky · Away", 12, TextAnchor.MiddleCenter, new Color(0.62f, 0.36f, 0.16f, 1f));
         statusText.gameObject.AddComponent<LayoutElement>().preferredHeight = 20f;
         var header = CreateText("Title", titleBar, "Chat", 21, TextAnchor.MiddleCenter, new Color(0.12f, 0.12f, 0.14f, 1f));
         header.fontStyle = FontStyle.Bold;

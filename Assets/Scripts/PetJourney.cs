@@ -91,6 +91,10 @@ public class PetJourney : MonoBehaviour
     Sprite[] memeSprites;
     Button galleryButton;
     GameObject galleryPanel;
+    CanvasGroup galleryGroup;
+    Coroutine galleryAnim;
+    bool galleryClosing;
+    const float GalleryPageScale = 1.5f;
     readonly List<Sprite> collectedMemes = new List<Sprite>();
     bool browsingGallery;
 
@@ -2040,13 +2044,15 @@ public class PetJourney : MonoBehaviour
             parent = canvas.transform;
         }
 
-        galleryPanel = new GameObject("Gallery", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        galleryPanel = new GameObject("Gallery", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(CanvasGroup));
         galleryPanel.transform.SetParent(parent, false);
         var rect = galleryPanel.GetComponent<RectTransform>();
         rect.anchorMin = new Vector2(0.5f, 0.5f);
         rect.anchorMax = new Vector2(0.5f, 0.5f);
         rect.pivot = new Vector2(0.5f, 0.5f);
         rect.sizeDelta = new Vector2(248f, 108f);
+        rect.localScale = Vector3.one * GalleryPageScale;
+        galleryGroup = galleryPanel.GetComponent<CanvasGroup>();
         var background = galleryPanel.GetComponent<Image>();
         background.color = new Color(0.99f, 0.96f, 0.9f, 1f);
         background.raycastTarget = true;
@@ -2102,11 +2108,26 @@ public class PetJourney : MonoBehaviour
 
     void CloseGallery()
     {
-        if (galleryPanel != null)
-            galleryPanel.SetActive(false);
+        if (galleryPanel == null || !galleryPanel.activeSelf || galleryClosing)
+            return;
+
         browsingGallery = false;
         if (memePopup != null)
             memePopup.SetActive(false);
+
+        if (galleryAnim != null)
+        {
+            StopCoroutine(galleryAnim);
+            galleryAnim = null;
+        }
+
+        galleryClosing = true;
+        if (galleryGroup != null)
+        {
+            galleryGroup.interactable = false;
+            galleryGroup.blocksRaycasts = false;
+        }
+        galleryAnim = StartCoroutine(AnimateGalleryClose());
     }
 
     public void OpenGallery()
@@ -2116,20 +2137,103 @@ public class PetJourney : MonoBehaviour
         if (galleryPanel == null)
             return;
 
-        if (!galleryPanel.activeSelf)
+        bool wasActive = galleryPanel.activeSelf;
+        if (!wasActive)
         {
             var rect = galleryPanel.GetComponent<RectTransform>();
             rect.anchorMin = new Vector2(0f, 0.5f);
             rect.anchorMax = new Vector2(0f, 0.5f);
             rect.pivot = new Vector2(0f, 0.5f);
             rect.anchoredPosition = new Vector2(424f, 0f);
+            rect.localScale = Vector3.one * (GalleryPageScale * 0.86f);
             galleryPanel.SetActive(true);
             galleryPanel.transform.SetAsLastSibling();
             RebuildGallery();
+            if (galleryGroup != null)
+                galleryGroup.alpha = 0f;
+        }
+        else if (!galleryClosing)
+        {
+            CloseGallery();
             return;
         }
 
-        CloseGallery();
+        if (galleryAnim != null)
+        {
+            StopCoroutine(galleryAnim);
+            galleryAnim = null;
+        }
+
+        galleryClosing = false;
+        galleryPanel.transform.SetAsLastSibling();
+        if (galleryGroup != null)
+        {
+            galleryGroup.interactable = false;
+            galleryGroup.blocksRaycasts = false;
+        }
+        galleryAnim = StartCoroutine(AnimateGalleryOpen());
+    }
+
+    IEnumerator AnimateGalleryOpen()
+    {
+        const float duration = 0.24f;
+        float elapsed = 0f;
+        var rect = galleryPanel.GetComponent<RectTransform>();
+        Vector3 fromScale = rect.localScale;
+        float fromAlpha = galleryGroup != null ? galleryGroup.alpha : 1f;
+        Vector3 targetScale = Vector3.one * GalleryPageScale;
+
+        while (elapsed < duration)
+        {
+            elapsed += Time.unscaledDeltaTime;
+            float t = Mathf.Clamp01(elapsed / duration);
+            float eased = 1f - Mathf.Pow(1f - t, 3f);
+            rect.localScale = Vector3.LerpUnclamped(fromScale, targetScale, eased);
+            if (galleryGroup != null)
+                galleryGroup.alpha = Mathf.Lerp(fromAlpha, 1f, eased);
+            yield return null;
+        }
+
+        rect.localScale = targetScale;
+        if (galleryGroup != null)
+        {
+            galleryGroup.alpha = 1f;
+            galleryGroup.interactable = true;
+            galleryGroup.blocksRaycasts = true;
+        }
+        galleryAnim = null;
+    }
+
+    IEnumerator AnimateGalleryClose()
+    {
+        const float duration = 0.18f;
+        float elapsed = 0f;
+        var rect = galleryPanel.GetComponent<RectTransform>();
+        Vector3 fromScale = rect.localScale;
+        float fromAlpha = galleryGroup != null ? galleryGroup.alpha : 1f;
+        Vector3 targetScale = Vector3.one * (GalleryPageScale * 0.9f);
+
+        while (elapsed < duration)
+        {
+            elapsed += Time.unscaledDeltaTime;
+            float t = Mathf.Clamp01(elapsed / duration);
+            float eased = Mathf.SmoothStep(0f, 1f, t);
+            rect.localScale = Vector3.LerpUnclamped(fromScale, targetScale, eased);
+            if (galleryGroup != null)
+                galleryGroup.alpha = Mathf.LerpUnclamped(fromAlpha, 0f, eased);
+            yield return null;
+        }
+
+        galleryPanel.SetActive(false);
+        rect.localScale = Vector3.one * GalleryPageScale;
+        if (galleryGroup != null)
+        {
+            galleryGroup.alpha = 1f;
+            galleryGroup.interactable = true;
+            galleryGroup.blocksRaycasts = true;
+        }
+        galleryClosing = false;
+        galleryAnim = null;
     }
 
     void AddGalleryClose(Transform parent)
@@ -2172,15 +2276,10 @@ public class PetJourney : MonoBehaviour
         if (galleryPanel == null || returning || waitingForDialogue)
             return;
 
-        bool open = !galleryPanel.activeSelf;
-        galleryPanel.SetActive(open);
-        if (open)
-        {
-            galleryPanel.transform.SetAsLastSibling();
-            RebuildGallery();
-        }
-        else
+        if (galleryPanel.activeSelf && !galleryClosing)
             CloseGallery();
+        else
+            OpenGallery();
     }
 
     void RebuildGallery()
