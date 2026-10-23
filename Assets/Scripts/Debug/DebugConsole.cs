@@ -116,6 +116,7 @@ namespace ScreamJam.Debugging
             RegisterCommand("ip", "/ip", "Show the player's approximate city.", _ => BeginIpLookup());
             RegisterCommand("sayip", "/sayip", "Ask whether the player lives in their IP city.", _ => BeginSayIp());
             RegisterCommand("sweeper", "/sweeper", "Open the daily minesweeper mini game.", _ => DailyMiniGame.Trigger());
+            RegisterCommand("supercooleffect", "/supercooleffect", "Freeze the screen with a glitch grid effect.", _ => SuperCoolEffect.Trigger());
             RegisterCommand("quit", "/quit", "Quit the game.", _ => QuitGame());
             _open = false;
             _toggleUnlocked = false;

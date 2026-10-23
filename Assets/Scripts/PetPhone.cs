@@ -79,6 +79,17 @@ public class PetPhone : MonoBehaviour
 
     public Text SpeechText => speechText;
     public bool IsOpen => phoneOpen && visual != null;
+    public static bool PhoneIconVisible => Instance != null
+        && Instance.phoneIcon != null
+        && Instance.phoneIcon.activeSelf;
+
+    public static void SetPhoneIconVisible(bool visible)
+    {
+        if (Instance == null || Instance.phoneIcon == null)
+            return;
+
+        Instance.phoneIcon.SetActive(visible);
+    }
 
     public static PetPhone Ensure()
     {

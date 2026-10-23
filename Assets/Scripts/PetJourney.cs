@@ -93,6 +93,7 @@ public class PetJourney : MonoBehaviour
     RectTransform moodWidget;
     Vector2 moodRestPosition;
     bool moodRestCached;
+    bool moodBarSuppressed;
     long returnAtTicks;
     long moodReadyAtTicks;
     float returnSecondsLeft = -1f;
@@ -492,6 +493,23 @@ public class PetJourney : MonoBehaviour
 
     public void ShowCollections()
     {
+    }
+
+    public static void SetMoodBarVisible(bool visible)
+    {
+        if (Instance == null)
+            return;
+
+        Instance.moodBarSuppressed = !visible;
+        if (!visible)
+        {
+            if (Instance.moodWidget != null)
+                Instance.moodWidget.gameObject.SetActive(false);
+        }
+        else
+        {
+            Instance.PlaceMoodWidget();
+        }
     }
 
     public void SetJourneyAvailable(bool visible)
@@ -2246,6 +2264,7 @@ public class PetJourney : MonoBehaviour
         bool openingReady = PetDialogue.Instance != null && PetDialogue.OpeningComplete;
         SpriteRenderer body = VisibleBody();
         bool visible = openingReady
+            && !moodBarSuppressed
             && body != null
             && body.enabled
             && body.gameObject.activeInHierarchy;
