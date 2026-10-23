@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Net;
 using System.Net.Sockets;
@@ -42,6 +43,8 @@ public class AdminPanel : MonoBehaviour
     Text statusText;
     Text terminalText;
     Coroutine outputRoutine;
+    Coroutine verifyRoutine;
+    bool verifying;
 
     static Sprite avatarSprite;
 
@@ -128,6 +131,15 @@ public class AdminPanel : MonoBehaviour
             outputRoutine = null;
         }
 
+        if (verifyRoutine != null)
+        {
+            StopCoroutine(verifyRoutine);
+            verifyRoutine = null;
+        }
+        verifying = false;
+        if (passwordInput != null)
+            passwordInput.interactable = true;
+
         if (canvasGroup != null)
         {
             canvasGroup.interactable = false;
@@ -212,7 +224,7 @@ public class AdminPanel : MonoBehaviour
         for (int i = 0; i < TerminalLines.Length; i++)
         {
             if (i > 0)
-                yield return new WaitForSecondsRealtime(Random.Range(0.3f, 0.9f));
+                yield return new WaitForSecondsRealtime(UnityEngine.Random.Range(0.3f, 0.9f));
 
             if (i > 0)
                 terminalText.text += "\n";
@@ -236,12 +248,65 @@ public class AdminPanel : MonoBehaviour
 
     void SubmitAdminPassword(string raw)
     {
-        if (passwordInput == null)
+        if (passwordInput == null || verifying)
             return;
 
+        string entered = string.IsNullOrEmpty(raw) ? string.Empty : raw.Trim();
         passwordInput.text = string.Empty;
-        passwordInput.ActivateInputField();
-        // Password validation will be added when the admin credential is supplied.
+        if (string.IsNullOrEmpty(entered))
+        {
+            passwordInput.ActivateInputField();
+            return;
+        }
+
+        if (outputRoutine != null)
+        {
+            StopCoroutine(outputRoutine);
+            outputRoutine = null;
+        }
+
+        verifying = true;
+        passwordInput.interactable = false;
+        if (verifyRoutine != null)
+            StopCoroutine(verifyRoutine);
+        verifyRoutine = StartCoroutine(VerifyPassword(entered));
+    }
+
+    IEnumerator VerifyPassword(string entered)
+    {
+        string prefix = terminalText != null ? terminalText.text : string.Empty;
+        if (!string.IsNullOrEmpty(prefix))
+            prefix += "\n";
+
+        const float duration = 3f;
+        float elapsed = 0f;
+        while (elapsed < duration)
+        {
+            elapsed += Time.unscaledDeltaTime;
+            int dots = 1 + Mathf.FloorToInt(elapsed / 0.4f) % 3;
+            if (terminalText != null)
+                terminalText.text = prefix + "VERIFYING" + new string('.', dots);
+            yield return null;
+        }
+
+        string expected = DailyMiniGame.Password;
+        bool accepted = !string.IsNullOrEmpty(expected)
+            && string.Equals(entered, expected, StringComparison.Ordinal);
+        if (terminalText != null)
+        {
+            terminalText.text = prefix + "VERIFYING...\n" +
+                (accepted
+                    ? "<color=#2f8f57>[SUCCESS]</color> ACCESS GRANTED"
+                    : "<color=#a33d3d>[WARN]</color> ACCESS DENIED");
+        }
+
+        verifying = false;
+        verifyRoutine = null;
+        if (passwordInput != null)
+        {
+            passwordInput.interactable = true;
+            passwordInput.ActivateInputField();
+        }
     }
 
     static float EaseOutBack(float t)

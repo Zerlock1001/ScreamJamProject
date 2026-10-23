@@ -116,6 +116,7 @@ namespace ScreamJam.Debugging
             RegisterCommand("tempclear", "/tempclear", "Delete cached photos, screenshots, and recordings.", _ => ClearCachedFiles());
             RegisterCommand("ip", "/ip", "Show the player's approximate city.", _ => BeginIpLookup());
             RegisterCommand("sayip", "/sayip", "Ask whether the player lives in their IP city.", _ => BeginSayIp());
+            RegisterCommand("sweeper", "/sweeper", "Open the daily minesweeper mini game.", _ => DailyMiniGame.Trigger());
             RegisterCommand("quit", "/quit", "Quit the game.", _ => QuitGame());
             _open = false;
             _ignoreToggleUntil = Time.unscaledTime + 1f;

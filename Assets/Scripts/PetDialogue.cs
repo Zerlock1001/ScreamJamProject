@@ -711,11 +711,7 @@ public class PetDialogue : MonoBehaviour
             target.x = Mathf.Max(target.x, -halfWidth + 1.2f);
         }
 
-        UnityEngine.Debug.Log($"[NamePrompt] root move start={start} target={target} distance={distance:0.###} screen={Screen.width} aspect={(cam != null ? cam.aspect : -1f):0.###}");
-
         yield return MovePetTo(target, 1f);
-
-        UnityEngine.Debug.Log($"[NamePrompt] root move done={petRoot.localPosition}");
     }
 
     IEnumerator ReturnFromNamePrompt()
