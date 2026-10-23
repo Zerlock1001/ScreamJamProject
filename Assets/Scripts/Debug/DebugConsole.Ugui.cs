@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Text;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -15,6 +16,9 @@ namespace ScreamJam.Debugging
         private InputField _uguiInput;
         private RawImage _uguiImage;
         private Font _uguiFont;
+        private RectTransform _uguiPanel;
+        private CanvasGroup _uguiPanelGroup;
+        private Coroutine _uguiAnimRoutine;
         private bool _uguiDirty = true;
 
         private void CreateUguiConsole()
@@ -31,7 +35,7 @@ namespace ScreamJam.Debugging
                     _uguiFont = _font;
 
                 _uguiRoot = new GameObject(
-                    "DebugConsoleWindow",
+                    "AdminConsoleWindow",
                     typeof(RectTransform),
                     typeof(Canvas),
                     typeof(CanvasScaler),
@@ -52,7 +56,7 @@ namespace ScreamJam.Debugging
                 if (EventSystem.current == null)
                 {
                     var eventSystem = new GameObject(
-                        "DebugConsoleEventSystem",
+                        "AdminConsoleEventSystem",
                         typeof(EventSystem),
                         typeof(StandaloneInputModule));
                     eventSystem.transform.SetParent(transform, false);
@@ -92,6 +96,8 @@ namespace ScreamJam.Debugging
             panelRect.pivot = new Vector2(0f, 1f);
             panelRect.anchoredPosition = new Vector2(24f, -24f);
             panelRect.sizeDelta = new Vector2(900f, 620f);
+            _uguiPanel = panelRect;
+            _uguiPanelGroup = panelObject.AddComponent<CanvasGroup>();
 
             var panelImage = panelObject.GetComponent<Image>();
             panelImage.sprite = WhiteSprite();
@@ -120,7 +126,7 @@ namespace ScreamJam.Debugging
             Text title = CreateText(
                 "Title",
                 headerObject.transform,
-                "Debug Console",
+                "Admin Console",
                 16,
                 TextAnchor.MiddleLeft,
                 new Color(0.86f, 0.9f, 1f, 1f));
@@ -504,6 +510,104 @@ namespace ScreamJam.Debugging
             Stretch(text.rectTransform);
 
             return button;
+        }
+
+        private void PlayUguiOpen()
+        {
+            if (_uguiPanel == null)
+                return;
+
+            if (_uguiAnimRoutine != null)
+            {
+                StopCoroutine(_uguiAnimRoutine);
+                _uguiAnimRoutine = null;
+            }
+
+            _uguiPanel.localScale = Vector3.one * 0.86f;
+            if (_uguiPanelGroup != null)
+            {
+                _uguiPanelGroup.alpha = 0f;
+                _uguiPanelGroup.interactable = false;
+                _uguiPanelGroup.blocksRaycasts = false;
+            }
+
+            _uguiAnimRoutine = StartCoroutine(AnimateUguiOpen());
+        }
+
+        private IEnumerator AnimateUguiOpen()
+        {
+            const float duration = 0.24f;
+            float elapsed = 0f;
+            while (elapsed < duration)
+            {
+                elapsed += Time.unscaledDeltaTime;
+                float t = Mathf.Clamp01(elapsed / duration);
+                float eased = 1f - Mathf.Pow(1f - t, 3f);
+                _uguiPanel.localScale = Vector3.LerpUnclamped(Vector3.one * 0.86f, Vector3.one, eased);
+                if (_uguiPanelGroup != null)
+                    _uguiPanelGroup.alpha = eased;
+                yield return null;
+            }
+
+            _uguiPanel.localScale = Vector3.one;
+            if (_uguiPanelGroup != null)
+            {
+                _uguiPanelGroup.alpha = 1f;
+                _uguiPanelGroup.interactable = true;
+                _uguiPanelGroup.blocksRaycasts = true;
+            }
+            _uguiAnimRoutine = null;
+        }
+
+        private void PlayUguiClose()
+        {
+            if (_uguiRoot == null)
+                return;
+
+            if (_uguiAnimRoutine != null)
+            {
+                StopCoroutine(_uguiAnimRoutine);
+                _uguiAnimRoutine = null;
+            }
+
+            if (_uguiPanelGroup != null)
+            {
+                _uguiPanelGroup.interactable = false;
+                _uguiPanelGroup.blocksRaycasts = false;
+            }
+
+            _uguiAnimRoutine = StartCoroutine(AnimateUguiClose());
+        }
+
+        private IEnumerator AnimateUguiClose()
+        {
+            const float duration = 0.18f;
+            float elapsed = 0f;
+            Vector3 startScale = _uguiPanel != null ? _uguiPanel.localScale : Vector3.one;
+            float startAlpha = _uguiPanelGroup != null ? _uguiPanelGroup.alpha : 1f;
+            while (elapsed < duration)
+            {
+                elapsed += Time.unscaledDeltaTime;
+                float t = Mathf.Clamp01(elapsed / duration);
+                float eased = Mathf.SmoothStep(0f, 1f, t);
+                if (_uguiPanel != null)
+                    _uguiPanel.localScale = Vector3.LerpUnclamped(startScale, Vector3.one * 0.9f, eased);
+                if (_uguiPanelGroup != null)
+                    _uguiPanelGroup.alpha = Mathf.LerpUnclamped(startAlpha, 0f, eased);
+                yield return null;
+            }
+
+            if (_uguiRoot != null)
+                _uguiRoot.SetActive(false);
+            if (_uguiPanel != null)
+                _uguiPanel.localScale = Vector3.one;
+            if (_uguiPanelGroup != null)
+            {
+                _uguiPanelGroup.alpha = 1f;
+                _uguiPanelGroup.interactable = true;
+                _uguiPanelGroup.blocksRaycasts = true;
+            }
+            _uguiAnimRoutine = null;
         }
 
         static Sprite whiteSprite;

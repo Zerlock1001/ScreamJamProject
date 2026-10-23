@@ -8,17 +8,44 @@ using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 /// <summary>
-/// Daily 5x5 minesweeper mini game. The numbers left on the cleared board,
-/// read left-to-right and top-to-bottom, are the admin panel password.
+/// Daily 5x5 minesweeper mini game. The cleared board contains only clue
+/// numbers 1-3, with each count kept between 1 and 9. The admin password is
+/// built from the counts selected by the colored squares in the admin panel.
 /// </summary>
 public class DailyMiniGame : MonoBehaviour
 {
     public static bool Finished => instance != null && instance.gameFinished;
     public static bool HasGame => instance != null && instance.boardGenerated;
-    public static string Password => instance != null ? instance.password : string.Empty;
+
+    public static int CountNumber(int number)
+    {
+        if (instance == null || !instance.boardGenerated || instance.adjacent == null
+            || number < 1 || number > MaxClue)
+            return 0;
+
+        int count = 0;
+        for (int i = 0; i < instance.adjacent.Length; i++)
+        {
+            if (!instance.mines[i] && instance.adjacent[i] == number)
+                count++;
+        }
+        return count;
+    }
+
+    public static string PasswordFor(IList<int> numbers)
+    {
+        if (instance == null || !instance.boardGenerated || numbers == null || numbers.Count == 0)
+            return string.Empty;
+
+        var builder = new StringBuilder();
+        for (int i = 0; i < numbers.Count; i++)
+            builder.Append(CountNumber(numbers[i]));
+        return builder.ToString();
+    }
 
     const int Size = 5;
     const int MineCount = 5;
+    const int MaxClue = 3;
     const int CanvasOrder = 20000;
     const float RetrySeconds = 3f;
     const float PopupSlideSeconds = 0.34f;
@@ -44,6 +71,7 @@ public class DailyMiniGame : MonoBehaviour
     Coroutine popupAnimRoutine;
     Coroutine windowAnimRoutine;
     Coroutine popupHoverRoutine;
+    RectTransform popupVisualRect;
     Text popupTitle;
     RectTransform popupSmileyRect;
     Text statusText;
@@ -68,7 +96,6 @@ public class DailyMiniGame : MonoBehaviour
     int flagsPlaced;
     int revealedSafe;
     int explodedIndex = -1;
-    string password = string.Empty;
 
     static Sprite bevelSprite;
     static Sprite cellBevelSprite;
@@ -85,7 +112,7 @@ public class DailyMiniGame : MonoBehaviour
 
     public static void Trigger()
     {
-        DebugConsole.CloseImmediate();
+        DebugConsole.CloseConsole();
         Ensure();
         if (instance == null)
             return;
@@ -133,7 +160,6 @@ public class DailyMiniGame : MonoBehaviour
             "DailyMiniGamePopup",
             typeof(RectTransform),
             typeof(CanvasRenderer),
-            typeof(Image),
             typeof(Button),
             typeof(CanvasGroup));
         popup.transform.SetParent(canvas, false);
@@ -147,7 +173,25 @@ public class DailyMiniGame : MonoBehaviour
         popupTargetPosition = popupRect.anchoredPosition;
         popupGroup = popup.GetComponent<CanvasGroup>();
 
-        var background = popup.GetComponent<Image>();
+        var visual = new GameObject("Visual", typeof(RectTransform));
+        visual.transform.SetParent(popup.transform, false);
+        popupVisualRect = visual.GetComponent<RectTransform>();
+        popupVisualRect.anchorMin = Vector2.zero;
+        popupVisualRect.anchorMax = Vector2.one;
+        popupVisualRect.offsetMin = Vector2.zero;
+        popupVisualRect.offsetMax = Vector2.zero;
+        popupVisualRect.pivot = new Vector2(0.5f, 0.5f);
+        popupVisualRect.localScale = Vector3.one;
+
+        var backgroundObject = new GameObject("Background", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        backgroundObject.transform.SetParent(popupVisualRect, false);
+        var backgroundRect = backgroundObject.GetComponent<RectTransform>();
+        backgroundRect.anchorMin = Vector2.zero;
+        backgroundRect.anchorMax = Vector2.one;
+        backgroundRect.offsetMin = Vector2.zero;
+        backgroundRect.offsetMax = Vector2.zero;
+
+        var background = backgroundObject.GetComponent<Image>();
         background.sprite = BevelSprite();
         background.type = Image.Type.Sliced;
         background.color = Color.white;
@@ -158,7 +202,7 @@ public class DailyMiniGame : MonoBehaviour
         button.transition = Selectable.Transition.None;
         button.onClick.AddListener(OpenWindow);
 
-        popupTitle = MakeText("Title", popup.transform, "DAILY MINI GAME!", 17, TextAnchor.MiddleLeft, new Color(0.08f, 0.08f, 0.09f, 1f));
+        popupTitle = MakeText("Title", popupVisualRect, "DAILY MINI GAME!", 17, TextAnchor.MiddleLeft, new Color(0.08f, 0.08f, 0.09f, 1f));
         popupTitle.fontStyle = FontStyle.Bold;
         var titleRect = popupTitle.rectTransform;
         titleRect.anchorMin = Vector2.zero;
@@ -168,7 +212,7 @@ public class DailyMiniGame : MonoBehaviour
         popupTitle.raycastTarget = false;
 
         var smiley = new GameObject("Smiley", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
-        smiley.transform.SetParent(popup.transform, false);
+        smiley.transform.SetParent(popupVisualRect, false);
         popupSmileyRect = smiley.GetComponent<RectTransform>();
         popupSmileyRect.anchorMin = new Vector2(1f, 0.5f);
         popupSmileyRect.anchorMax = new Vector2(1f, 0.5f);
@@ -181,7 +225,7 @@ public class DailyMiniGame : MonoBehaviour
         smileyImage.preserveAspect = true;
         smileyImage.raycastTarget = false;
 
-        var hover = popup.AddComponent<PopupHoverRelay>();
+        var hover = backgroundObject.AddComponent<PopupHoverRelay>();
         hover.Changed = SetPopupHover;
     }
 
@@ -465,30 +509,35 @@ public class DailyMiniGame : MonoBehaviour
                 : new Color(0.08f, 0.08f, 0.09f, 1f);
         }
 
-        if (popupSmileyRect == null)
+        if (popupSmileyRect == null || popupVisualRect == null)
             return;
 
-        float target = hovered ? (gameFinished ? 1.25f : 1.10f) : 1f;
+        float popupTarget = hovered ? 1.05f : 1f;
+        float iconTarget = hovered ? 1.10f : 1f;
         if (popupHoverRoutine != null)
             StopCoroutine(popupHoverRoutine);
-        popupHoverRoutine = StartCoroutine(AnimatePopupIcon(target));
+        popupHoverRoutine = StartCoroutine(AnimatePopupHover(popupTarget, iconTarget));
     }
 
-    IEnumerator AnimatePopupIcon(float target)
+    IEnumerator AnimatePopupHover(float popupTarget, float iconTarget)
     {
-        float start = popupSmileyRect.localScale.x;
+        float popupStart = popupVisualRect.localScale.x;
+        float iconStart = popupSmileyRect.localScale.x;
         float elapsed = 0f;
         while (elapsed < 0.12f)
         {
             elapsed += Time.unscaledDeltaTime;
             float t = Mathf.Clamp01(elapsed / 0.12f);
             float eased = 1f - Mathf.Pow(1f - t, 3f);
-            float scale = Mathf.LerpUnclamped(start, target, eased);
-            popupSmileyRect.localScale = Vector3.one * scale;
+            float popupScale = Mathf.LerpUnclamped(popupStart, popupTarget, eased);
+            float iconScale = Mathf.LerpUnclamped(iconStart, iconTarget, eased);
+            popupVisualRect.localScale = Vector3.one * popupScale;
+            popupSmileyRect.localScale = Vector3.one * iconScale;
             yield return null;
         }
 
-        popupSmileyRect.localScale = Vector3.one * target;
+        popupVisualRect.localScale = Vector3.one * popupTarget;
+        popupSmileyRect.localScale = Vector3.one * iconTarget;
         popupHoverRoutine = null;
     }
 
@@ -601,19 +650,7 @@ public class DailyMiniGame : MonoBehaviour
         flagged = new bool[Size * Size];
         adjacent = new int[Size * Size];
 
-        var available = new List<int>(Size * Size);
-        for (int i = 0; i < Size * Size; i++)
-            available.Add(i);
-
-        for (int i = 0; i < MineCount; i++)
-        {
-            int pick = UnityEngine.Random.Range(0, available.Count);
-            mines[available[pick]] = true;
-            available.RemoveAt(pick);
-        }
-
-        ComputeAdjacent();
-        password = BuildPassword();
+        GenerateValidMines();
         boardGenerated = true;
         gameFinished = false;
         gameLost = false;
@@ -632,6 +669,66 @@ public class DailyMiniGame : MonoBehaviour
         for (int i = 0; i < cells.Length; i++)
             UpdateCell(i);
         UpdateStatus();
+    }
+
+    void GenerateValidMines()
+    {
+        for (int attempt = 0; attempt < 4000; attempt++)
+        {
+            var available = new List<int>(Size * Size);
+            for (int i = 0; i < Size * Size; i++)
+            {
+                mines[i] = false;
+                available.Add(i);
+            }
+
+            for (int i = 0; i < MineCount; i++)
+            {
+                int pick = UnityEngine.Random.Range(0, available.Count);
+                mines[available[pick]] = true;
+                available.RemoveAt(pick);
+            }
+
+            ComputeAdjacent();
+            if (BoardIsValid())
+                return;
+        }
+    }
+
+    bool BoardIsValid()
+    {
+        if (!CluesWithinLimit())
+            return false;
+
+        int ones = 0;
+        int twos = 0;
+        int threes = 0;
+        for (int i = 0; i < Size * Size; i++)
+        {
+            if (mines[i])
+                continue;
+
+            switch (adjacent[i])
+            {
+                case 1: ones++; break;
+                case 2: twos++; break;
+                case 3: threes++; break;
+            }
+        }
+
+        return ones >= 1 && ones <= 9
+            && twos >= 1 && twos <= 9
+            && threes >= 1 && threes <= 9;
+    }
+
+    bool CluesWithinLimit()
+    {
+        for (int i = 0; i < Size * Size; i++)
+        {
+            if (!mines[i] && adjacent[i] > MaxClue)
+                return false;
+        }
+        return true;
     }
 
     void ComputeAdjacent()
@@ -660,18 +757,6 @@ public class DailyMiniGame : MonoBehaviour
         }
     }
 
-    string BuildPassword()
-    {
-        var builder = new StringBuilder();
-        for (int i = 0; i < Size * Size; i++)
-        {
-            if (mines[i] || adjacent[i] <= 0)
-                continue;
-            builder.Append(adjacent[i]);
-        }
-        return builder.ToString();
-    }
-
     void OnCellClicked(int index, PointerEventData.InputButton button)
     {
         if (inputLocked || index < 0 || index >= cells.Length)
@@ -692,10 +777,7 @@ public class DailyMiniGame : MonoBehaviour
         {
             hasStarted = true;
             if (mines[index])
-            {
                 RelocateMine(index);
-                password = BuildPassword();
-            }
         }
 
         if (mines[index])
@@ -749,9 +831,15 @@ public class DailyMiniGame : MonoBehaviour
             int candidate = UnityEngine.Random.Range(0, Size * Size);
             if (candidate == safeIndex || mines[candidate])
                 continue;
+
             mines[candidate] = true;
-            break;
+            ComputeAdjacent();
+            if (BoardIsValid())
+                return;
+
+            mines[candidate] = false;
         }
+
         ComputeAdjacent();
     }
 

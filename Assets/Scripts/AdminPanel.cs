@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Net;
 using System.Net.Sockets;
+using ScreamJam.Debugging;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -45,6 +46,8 @@ public class AdminPanel : MonoBehaviour
     Coroutine outputRoutine;
     Coroutine verifyRoutine;
     bool verifying;
+    bool accessGranted;
+    int[] colorSequence;
 
     static Sprite avatarSprite;
 
@@ -108,6 +111,10 @@ public class AdminPanel : MonoBehaviour
         root.transform.SetAsLastSibling();
         if (!wasActive)
         {
+            accessGranted = false;
+            verifying = false;
+            if (passwordInput != null)
+                passwordInput.text = string.Empty;
             animRoutine = StartCoroutine(AnimateOpen());
             StartTerminalOutput();
         }
@@ -210,6 +217,7 @@ public class AdminPanel : MonoBehaviour
         if (terminalText == null)
             return;
 
+        GenerateColorSequence();
         if (outputRoutine != null)
             StopCoroutine(outputRoutine);
         outputRoutine = StartCoroutine(StreamTerminal());
@@ -231,7 +239,59 @@ public class AdminPanel : MonoBehaviour
             terminalText.text += TerminalLines[i];
         }
 
+        if (colorSequence != null && colorSequence.Length > 0)
+            terminalText.text += "  " + ColorHintMarkup();
         outputRoutine = null;
+    }
+
+    void GenerateColorSequence()
+    {
+        // Classic minesweeper number colors: 1 blue, 2 green, 3 red.
+        // Seed all three colors first, then fill and shuffle so every color
+        // appears at least once in the six-square hint.
+        colorSequence = new int[6];
+        colorSequence[0] = 1;
+        colorSequence[1] = 2;
+        colorSequence[2] = 3;
+        for (int i = 3; i < colorSequence.Length; i++)
+        {
+            int color = UnityEngine.Random.Range(0, 3);
+            colorSequence[i] = color == 0 ? 3 : (color == 1 ? 2 : 1);
+        }
+
+        for (int i = colorSequence.Length - 1; i > 0; i--)
+        {
+            int swap = UnityEngine.Random.Range(0, i + 1);
+            int value = colorSequence[i];
+            colorSequence[i] = colorSequence[swap];
+            colorSequence[swap] = value;
+        }
+    }
+
+    string ColorHintMarkup()
+    {
+        string result = string.Empty;
+        for (int i = 0; i < colorSequence.Length; i++)
+        {
+            string color;
+            switch (colorSequence[i])
+            {
+                case 3:
+                    color = "#e05a5a";
+                    break;
+                case 2:
+                    color = "#55c978";
+                    break;
+                default:
+                    color = "#5f8dff";
+                    break;
+            }
+
+            if (i > 0)
+                result += " ";
+            result += "<size=18><color=" + color + ">■</color></size>";
+        }
+        return result;
     }
 
     IEnumerator FocusPassword()
@@ -248,11 +308,10 @@ public class AdminPanel : MonoBehaviour
 
     void SubmitAdminPassword(string raw)
     {
-        if (passwordInput == null || verifying)
+        if (passwordInput == null || verifying || accessGranted)
             return;
 
         string entered = string.IsNullOrEmpty(raw) ? string.Empty : raw.Trim();
-        passwordInput.text = string.Empty;
         if (string.IsNullOrEmpty(entered))
         {
             passwordInput.ActivateInputField();
@@ -266,7 +325,6 @@ public class AdminPanel : MonoBehaviour
         }
 
         verifying = true;
-        passwordInput.interactable = false;
         if (verifyRoutine != null)
             StopCoroutine(verifyRoutine);
         verifyRoutine = StartCoroutine(VerifyPassword(entered));
@@ -289,7 +347,7 @@ public class AdminPanel : MonoBehaviour
             yield return null;
         }
 
-        string expected = DailyMiniGame.Password;
+        string expected = DailyMiniGame.PasswordFor(colorSequence);
         bool accepted = !string.IsNullOrEmpty(expected)
             && string.Equals(entered, expected, StringComparison.Ordinal);
         if (terminalText != null)
@@ -302,11 +360,23 @@ public class AdminPanel : MonoBehaviour
 
         verifying = false;
         verifyRoutine = null;
-        if (passwordInput != null)
-        {
-            passwordInput.interactable = true;
+        accessGranted = accepted;
+        if (!accepted && passwordInput != null)
             passwordInput.ActivateInputField();
-        }
+
+        if (accepted)
+            StartCoroutine(OpenConsoleAfterGrant());
+    }
+
+    IEnumerator OpenConsoleAfterGrant()
+    {
+        yield return new WaitForSecondsRealtime(0.9f);
+        Hide();
+        yield return new WaitForSecondsRealtime(0.2f);
+        DebugConsole.OpenConsole();
+        DebugConsole.WriteLine("Access granted");
+        yield return new WaitForSecondsRealtime(0.5f);
+        DebugConsole.WriteLine("Welcome user admin_OcOm!");
     }
 
     static float EaseOutBack(float t)
@@ -487,6 +557,7 @@ public class AdminPanel : MonoBehaviour
         passwordInput.targetGraphic = passwordImage;
         passwordInput.textComponent = passwordText;
         passwordInput.contentType = InputField.ContentType.Password;
+        passwordInput.asteriskChar = '*';
         passwordInput.lineType = InputField.LineType.SingleLine;
         passwordInput.characterLimit = 64;
         passwordInput.caretColor = AccentColor;

@@ -260,12 +260,52 @@ namespace ScreamJam.Debugging
             }
         }
 
+        public static void OpenConsole()
+        {
+            if (_instance == null)
+                return;
+
+            _instance.SetOpen(true);
+        }
+
+        public static void CloseConsole()
+        {
+            if (_instance == null)
+                return;
+
+            _instance.SetOpen(false);
+        }
+
         public static void CloseImmediate()
         {
             if (_instance == null)
                 return;
 
+            bool wasOpen = _instance._open;
             _instance._open = false;
+            if (wasOpen)
+            {
+                Cursor.visible = _instance._previousCursorVisible;
+                Cursor.lockState = _instance._previousCursorLock;
+            }
+
+            if (_instance._uguiAnimRoutine != null)
+            {
+                _instance.StopCoroutine(_instance._uguiAnimRoutine);
+                _instance._uguiAnimRoutine = null;
+            }
+
+            if (_instance._uguiPanel != null)
+            {
+                _instance._uguiPanel.localScale = Vector3.one;
+                if (_instance._uguiPanelGroup != null)
+                {
+                    _instance._uguiPanelGroup.alpha = 1f;
+                    _instance._uguiPanelGroup.interactable = true;
+                    _instance._uguiPanelGroup.blocksRaycasts = true;
+                }
+            }
+
             if (_instance._uguiRoot != null)
                 _instance._uguiRoot.SetActive(false);
         }
@@ -290,11 +330,12 @@ namespace ScreamJam.Debugging
                     _uguiRoot.SetActive(true);
                     _uguiDirty = true;
                     RefreshUguiConsole();
+                    PlayUguiOpen();
                     FocusUguiInput();
                 }
                 else
                 {
-                    _uguiRoot.SetActive(false);
+                    PlayUguiClose();
                     Cursor.visible = _previousCursorVisible;
                     Cursor.lockState = _previousCursorLock;
                 }
@@ -410,7 +451,7 @@ namespace ScreamJam.Debugging
 
             GUILayout.BeginHorizontal();
 
-            GUILayout.Label("Debug Console (" + _entries.Count + ")", _titleStyle);
+            GUILayout.Label("Admin Console (" + _entries.Count + ")", _titleStyle);
             GUILayout.FlexibleSpace();
             GUILayout.Label("~ to close", _hintStyle, GUILayout.Width(80f));
 
