@@ -542,8 +542,7 @@ public class AdminPanel : MonoBehaviour
         passwordInput = passwordObject.GetComponent<InputField>();
         passwordInput.targetGraphic = passwordImage;
         passwordInput.textComponent = passwordText;
-        passwordInput.contentType = InputField.ContentType.Password;
-        passwordInput.asteriskChar = '*';
+        passwordInput.contentType = InputField.ContentType.Standard;
         passwordInput.lineType = InputField.LineType.SingleLine;
         passwordInput.characterLimit = 64;
         passwordInput.caretColor = AccentColor;
