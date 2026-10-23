@@ -37,9 +37,16 @@ public class PetCampaign : MonoBehaviour
             return new Step { kind = Kind.Lines, lines = lines };
         }
 
+        public int choice;
+
         public static Step Choose()
         {
             return new Step { kind = Kind.Choice };
+        }
+
+        public static Step ChooseSecond()
+        {
+            return new Step { kind = Kind.Choice, choice = 1 };
         }
 
         public static Step Big(string line)
@@ -59,8 +66,20 @@ public class PetCampaign : MonoBehaviour
     }
 
     public static PetCampaign Instance { get; private set; }
-    public static bool BlocksJourney => Instance != null && (Instance.busy || Instance.dead || Instance.hungerLooping || Instance.choiceOpen);
+    public static bool BlocksJourney => Instance != null && (Instance.busy || Instance.dead || Instance.hungerLooping || Instance.choiceOpen || Instance.awaitingAgree);
     public bool HasIntroduced => introduced;
+    public bool HoldsSecondJourney
+    {
+        get
+        {
+            if (featuresUnlocked || awaitingAgree)
+                return false;
+            PetStory.Phase phase = PetStory.Current;
+            return phase != PetStory.Phase.Refused && phase != PetStory.Phase.Final;
+        }
+    }
+    public bool PlaysSecondScript(int trip) => trip >= 2 && HoldsSecondJourney;
+    public bool SecondJourneyRepeats => secondAsks > 0;
 
     bool busy;
     bool dead;
@@ -71,6 +90,10 @@ public class PetCampaign : MonoBehaviour
     bool pending;
     bool introduced;
     bool offerUnlocked;
+    bool featuresUnlocked;
+    bool awaitingAgree;
+    bool armAgree;
+    int secondAsks;
     bool retract;
     int feeds;
     int sent;
@@ -141,6 +164,7 @@ public class PetCampaign : MonoBehaviour
         Instance = this;
         LoadProgress();
         DebugConsole.RegisterCommand("offer", "/offer", "After the tenth return, choose to join or refuse.", _ => Offer());
+        DebugConsole.RegisterCommand("agree", "\\agree", "After agreeing on the second return, unlock the next state.", AgreeCommand);
     }
 
     bool progressLoaded;
@@ -153,6 +177,9 @@ public class PetCampaign : MonoBehaviour
         progressLoaded = true;
         introduced = PlayerPrefs.GetInt("PetCampaign.Introduced", 0) != 0;
         offerUnlocked = PlayerPrefs.GetInt("PetCampaign.OfferUnlocked", 0) != 0;
+        featuresUnlocked = PlayerPrefs.GetInt("PetCampaign.FeaturesUnlocked", 0) != 0;
+        awaitingAgree = PlayerPrefs.GetInt("PetCampaign.AwaitingAgree", 0) != 0;
+        secondAsks = PlayerPrefs.GetInt("PetCampaign.SecondAsks", 0);
         int trips = PetJourney.Instance != null ? PetJourney.Instance.CompletedTrips : 0;
         if (trips >= 2)
             introduced = true;
@@ -180,6 +207,9 @@ public class PetCampaign : MonoBehaviour
 
         PlayerPrefs.SetInt("PetCampaign.Introduced", introduced ? 1 : 0);
         PlayerPrefs.SetInt("PetCampaign.OfferUnlocked", offerUnlocked ? 1 : 0);
+        PlayerPrefs.SetInt("PetCampaign.FeaturesUnlocked", featuresUnlocked ? 1 : 0);
+        PlayerPrefs.SetInt("PetCampaign.AwaitingAgree", awaitingAgree ? 1 : 0);
+        PlayerPrefs.SetInt("PetCampaign.SecondAsks", secondAsks);
         PlayerPrefs.Save();
     }
 
@@ -263,7 +293,8 @@ public class PetCampaign : MonoBehaviour
         homeSteps = new[]
         {
             Step.Choose(),
-            Step.Say("That trip wore me out. Let me rest before I can head out again. See the picture button on the left of your phone? Open it, and you can see every meme I found. If this rest feels too slow, the bar beside me has to fill before I can leave again.")
+            Step.Say("That trip wore me out. Let me rest before I can head out again."),
+            Step.Say("See the picture button on the left of your phone? Open it, and you can see every meme I found. If this rest feels too slow, the bar beside me has to fill before I can leave again.")
         };
         index = 0;
         Play();
@@ -284,6 +315,52 @@ public class PetCampaign : MonoBehaviour
         PetDialogue.SayLines(line);
     }
 
+    void AskSecondReturn()
+    {
+        string name = PetDialogue.HasPlayerName ? PetDialogue.PlayerName : "there";
+        string question = secondAsks > 0
+            ? name + ", I'm back! That paper was pretty good. Do you want to understand your friends more deeply?"
+            : name + ", I'm back! About that post, do you want to understand your friends that well, too?";
+        PetDialogue.Ask(question, () => AnswerSecond(true), () => AnswerSecond(false));
+    }
+
+    void AnswerSecond(bool yes)
+    {
+        secondAsks++;
+        SaveFlags();
+        if (!yes)
+        {
+            PetDialogue.Say("Alright. Maybe you'll change your mind later.");
+            FinishStep();
+            return;
+        }
+
+        listening = true;
+        armAgree = true;
+        PetDialogue.SayLines(
+            "Oh. I can do that. Let me show you how to unlock some of what I can do.",
+            "Press ~ to open the console, and type \\agree.");
+    }
+
+    void AgreeCommand(string[] _)
+    {
+        if (!awaitingAgree || featuresUnlocked)
+        {
+            DebugConsole.WriteLine("Nothing answers.");
+            return;
+        }
+
+        awaitingAgree = false;
+        featuresUnlocked = true;
+        SaveFlags();
+        PetStory.SetUseComputerName(true);
+        PetStory.SetPhase(PetStory.Phase.StateII);
+        PetDialogue.Say("Hello, {name}. From now on, when I'm out, I'll bring you some <color=#c41616>especially interesting</color> things. Send me out right away.");
+        if (PetJourney.Instance != null)
+            PetJourney.Instance.RecoverMood();
+        DebugConsole.WriteLine("Agreed.");
+    }
+
     public void OnTripStarted(int trip, float duration)
     {
         if (tripRoutine != null)
@@ -297,7 +374,11 @@ public class PetCampaign : MonoBehaviour
         sent = 0;
         retract = false;
         firstReturnScript = false;
-        if (trip <= 1 || PetStory.Current == PetStory.Phase.Refused)
+        if (trip <= 1 || PetStory.Current == PetStory.Phase.Refused || PlaysSecondScript(trip))
+            return;
+        if (trip == 3 && PetStory.Current != PetStory.Phase.Final)
+            return;
+        if (trip == 4 && PetStory.Current != PetStory.Phase.Final)
             return;
 
         tripLines = LinesForTrip(trip);
@@ -337,6 +418,14 @@ public class PetCampaign : MonoBehaviour
         if (PetStory.Current == PetStory.Phase.Final)
         {
             homeSteps = new[] { Step.Say(Next(homeBag, JoinHome)) };
+            index = 0;
+            Play();
+            return;
+        }
+
+        if (PlaysSecondScript(trip))
+        {
+            homeSteps = new[] { Step.ChooseSecond() };
             index = 0;
             Play();
             return;
@@ -401,9 +490,16 @@ public class PetCampaign : MonoBehaviour
         if (homeSteps == null || index >= homeSteps.Length)
         {
             bool nag = firstReturnScript;
+            bool unlock = armAgree;
             firstReturnScript = false;
+            armAgree = false;
             busy = false;
             homeSteps = null;
+            if (unlock)
+            {
+                awaitingAgree = true;
+                SaveFlags();
+            }
             if (nag)
             {
                 introduced = true;
@@ -432,7 +528,10 @@ public class PetCampaign : MonoBehaviour
                 PetDialogue.SayLines(step.lines);
                 return;
             case Kind.Choice:
-                AskFirstReturn();
+                if (step.choice == 1)
+                    AskSecondReturn();
+                else
+                    AskFirstReturn();
                 return;
             case Kind.Emphasis:
                 listening = true;
@@ -601,19 +700,9 @@ public class PetCampaign : MonoBehaviour
                     "Coming back with a few."
                 };
             case 3:
-                return new[]
-                {
-                    "I know the way now.",
-                    "This one would make you laugh.",
-                    "I waited. Nothing important happened.",
-                    "The bag is full."
-                };
+                return new string[0];
             case 4:
-                return new[]
-                {
-                    "This trip feels longer than it should.",
-                    "The light here is wrong."
-                };
+                return new string[0];
             case 5:
                 return new[]
                 {
@@ -680,16 +769,12 @@ public class PetCampaign : MonoBehaviour
             case 3:
                 return new[]
                 {
-                    Step.Say("I can go again after I rest."),
-                    Step.Say("Don't send me out while I'm still pale.")
+                    Step.Say("{name}, I'm back!")
                 };
             case 4:
                 return new[]
                 {
-                    new Step { kind = Kind.Death },
-                    Step.Say("I'm back. Don't ask where I went. The eye was only a dream."),
-                    Step.Say("I can search again after the bar recovers."),
-                    Step.Say("If I go quiet, don't look for the reason.")
+                    Step.Say("{name}, I'm back!")
                 };
             case 5:
                 return new[]

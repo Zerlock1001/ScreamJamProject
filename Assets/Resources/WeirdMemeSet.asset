@@ -1,0 +1,20 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c3a91e7b5d4f4a2e8b6c0d1f9a7e3456, type: 3}
+  m_Name: WeirdMemeSet
+  m_EditorClassIdentifier: 
+  memes:
+  - {fileID: 21300000, guid: 1ebf051cfd0747f4a8d80229f42f39b6, type: 3}
+  - {fileID: 21300000, guid: aa9dd8e3282a9c340a526945b1b34c41, type: 3}
+  - {fileID: 21300000, guid: 07369939272fd8f4c8aa7a95b50bc0a5, type: 3}
+  - {fileID: 21300000, guid: f0cb2ccf18a3e934f8d9108d3c2c856c, type: 3}
+  - {fileID: 21300000, guid: 88285d13f74d9f748ac93c1936083efb, type: 3}

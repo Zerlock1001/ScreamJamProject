@@ -8,6 +8,7 @@ using System.Text;
 using ScreamJam.Audio;
 using ScreamJam.Utility;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace ScreamJam.Debugging
 {
@@ -70,6 +71,9 @@ namespace ScreamJam.Debugging
 
         private bool _previousCursorVisible;
         private CursorLockMode _previousCursorLock;
+        private float _ignoreToggleUntil;
+        private float _startupCloseUntil;
+        private bool _sawGameFocus;
 
         private Font _font;
         private GUIStyle _logStyle;
@@ -114,12 +118,50 @@ namespace ScreamJam.Debugging
             RegisterCommand("sayip", "/sayip", "Ask whether the player lives in their IP city.", _ => BeginSayIp());
             RegisterCommand("quit", "/quit", "Quit the game.", _ => QuitGame());
             _open = false;
+            _ignoreToggleUntil = Time.unscaledTime + 1f;
+            _startupCloseUntil = _ignoreToggleUntil;
             if (_uguiRoot != null)
                 _uguiRoot.SetActive(false);
         }
 
+        private void OnEnable()
+        {
+            SceneManager.sceneLoaded += OnSceneLoaded;
+        }
+
+        private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+        {
+            _sawGameFocus = false;
+            float until = Time.unscaledTime + 1f;
+            if (until > _ignoreToggleUntil)
+                _ignoreToggleUntil = until;
+            if (until > _startupCloseUntil)
+                _startupCloseUntil = until;
+            CloseImmediate();
+        }
+
+        private void OnApplicationFocus(bool hasFocus)
+        {
+            if (!hasFocus)
+                return;
+
+            // Play mode and alt-tab deliver a stray `~` as the window gains focus.
+            // That was opening the console by itself at startup.
+            float block = _sawGameFocus ? 0.25f : 1f;
+            _sawGameFocus = true;
+            float until = Time.unscaledTime + block;
+            if (until > _ignoreToggleUntil)
+                _ignoreToggleUntil = until;
+        }
+
+        private bool ToggleBlocked()
+        {
+            return Time.unscaledTime < _ignoreToggleUntil;
+        }
+
         private void OnDestroy()
         {
+            SceneManager.sceneLoaded -= OnSceneLoaded;
             Application.logMessageReceivedThreaded -= OnLogMessage;
 
             if (_uguiRoot != null)
@@ -149,13 +191,16 @@ namespace ScreamJam.Debugging
 
         private void Update()
         {
+            if (Time.unscaledTime < _startupCloseUntil && _open)
+                CloseImmediate();
+
             UpdateUguiConsole();
 
             // KeyCode.BackQuote is the `~` key on a US keyboard layout.
             // OnGUI also checks this key, because a focused text field can
             // swallow the event in some situations. ToggleConsole de-dupes
             // the two paths so one key press always means one toggle.
-            if (Time.frameCount > 2 && Input.GetKeyDown(KeyCode.BackQuote))
+            if (!ToggleBlocked() && Input.GetKeyDown(KeyCode.BackQuote))
                 ToggleConsole();
 
             if (_open)
@@ -323,7 +368,7 @@ namespace ScreamJam.Debugging
                 return;
 
             // Catch `~` before the command text field can consume it.
-            if (Time.frameCount > 2 &&
+            if (!ToggleBlocked() &&
                 Event.current.type == EventType.KeyDown &&
                 Event.current.keyCode == KeyCode.BackQuote)
             {
@@ -695,7 +740,7 @@ namespace ScreamJam.Debugging
         {
             name = name.Trim();
 
-            while (name.StartsWith("/", StringComparison.Ordinal))
+            while (name.StartsWith("/", StringComparison.Ordinal) || name.StartsWith("\\", StringComparison.Ordinal))
                 name = name.Substring(1).TrimStart();
 
             return name.ToLowerInvariant();
