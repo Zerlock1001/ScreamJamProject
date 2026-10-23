@@ -32,6 +32,13 @@ public class AdminPanel : MonoBehaviour
         "<color=#e6e6e8>//: ENTER ADMIN PASSWORD</color>"
     };
 
+    static readonly string[] GrantedLines =
+    {
+        "admin@panel:~# access --admin",
+        "<color=#2f8f57>[SUCCESS]</color> SECURE CHANNEL ESTABLISHED",
+        "<color=#2f8f57>[SUCCESS]</color> ACCESS GRANTED / WELCOME USER ADMIN_OcOm!"
+    };
+
     static AdminPanel instance;
     GameObject root;
     CanvasGroup canvasGroup;
@@ -111,7 +118,7 @@ public class AdminPanel : MonoBehaviour
         root.transform.SetAsLastSibling();
         if (!wasActive)
         {
-            accessGranted = false;
+            accessGranted = AdminAccessUnlocked();
             verifying = false;
             if (passwordInput != null)
                 passwordInput.text = string.Empty;
@@ -217,10 +224,21 @@ public class AdminPanel : MonoBehaviour
         if (terminalText == null)
             return;
 
-        GenerateColorSequence();
+        if (accessGranted)
+            colorSequence = null;
+        else
+            GenerateColorSequence();
         if (outputRoutine != null)
             StopCoroutine(outputRoutine);
         outputRoutine = StartCoroutine(StreamTerminal());
+    }
+
+    static bool AdminAccessUnlocked()
+    {
+        PetStory.Phase phase = PetStory.Current;
+        return phase == PetStory.Phase.StateII
+            || phase == PetStory.Phase.StateIII
+            || phase == PetStory.Phase.Final;
     }
 
     IEnumerator StreamTerminal()
@@ -228,19 +246,20 @@ public class AdminPanel : MonoBehaviour
         if (terminalText == null)
             yield break;
 
+        string[] lines = accessGranted ? GrantedLines : TerminalLines;
         terminalText.text = string.Empty;
-        for (int i = 0; i < TerminalLines.Length; i++)
+        for (int i = 0; i < lines.Length; i++)
         {
             if (i > 0)
                 yield return new WaitForSecondsRealtime(UnityEngine.Random.Range(0.3f, 0.9f));
 
             if (i > 0)
                 terminalText.text += "\n";
-            terminalText.text += TerminalLines[i];
+            terminalText.text += lines[i];
             StartCoroutine(ScrollTerminalToBottom());
         }
 
-        if (colorSequence != null && colorSequence.Length > 0)
+        if (!accessGranted && colorSequence != null && colorSequence.Length > 0)
             terminalText.text += "  " + ColorHintMarkup();
         StartCoroutine(ScrollTerminalToBottom());
         outputRoutine = null;

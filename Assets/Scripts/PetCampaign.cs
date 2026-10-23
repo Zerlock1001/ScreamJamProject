@@ -310,8 +310,8 @@ public class PetCampaign : MonoBehaviour
         homeSteps = new[]
         {
             Step.Choose(),
-            Step.Say("That trip wore me out. Let me rest before I can head out again."),
-            Step.Say("See the picture button on the left of your phone? Open it, and you can see every meme I found. If this rest feels too slow, the bar beside me has to fill before I can leave again.")
+            Step.Say("I'm a little tired after coming back from that trip. Let me rest before I can set out on the next journey."),
+            Step.Say("Oh, right. See the gallery button on the right side of your phone? Open it, and you can see every meme I found for you! I also saved the pictures on the desktop, so you can look through them again.")
         };
         index = 0;
         Play();
@@ -624,7 +624,6 @@ public class PetCampaign : MonoBehaviour
                     PetDialogue.SayLink("Come take a look at your membership card...", cardUrl);
                 return;
             case Kind.Desk:
-                CreateTrueBlinkyShortcut();
                 listening = true;
                 PetDialogue.Say("Whenever you think of me, you can summon me from the desktop anytime.");
                 return;
@@ -1227,7 +1226,7 @@ public class PetCampaign : MonoBehaviour
         string text = raw.Trim();
         if (text.Length > 0 && (text[0] == '\\' || text[0] == '/'))
             text = text.Substring(1).Trim();
-        return string.Equals(text, "Oculus Omnis", StringComparison.OrdinalIgnoreCase);
+        return string.Equals(text, "oconis", StringComparison.OrdinalIgnoreCase);
     }
 
     public static void TryJoinCult()
@@ -1273,6 +1272,9 @@ public class PetCampaign : MonoBehaviour
         armAgree = false;
         DailyMiniGame.Close();
         PetStory.SetPhase(PetStory.Phase.StateIII);
+        CreateTrueBlinkyShortcut();
+        if (PetJourney.Instance != null)
+            PetJourney.Instance.UseFinalCharacter();
 
         var steps = new List<Step>();
         if (early)
@@ -1299,10 +1301,10 @@ public class PetCampaign : MonoBehaviour
     static string MemberId()
     {
         string id = PlayerPrefs.GetString(MemberIdKey, "");
-        if (id != null && id.Length == 8)
+        if (id != null && id.Length == 6)
             return id;
 
-        id = UnityEngine.Random.Range(0, 100000000).ToString("D8");
+        id = UnityEngine.Random.Range(0, 1000000).ToString("D6");
         PlayerPrefs.SetString(MemberIdKey, id);
         PlayerPrefs.Save();
         return id;
@@ -1312,12 +1314,21 @@ public class PetCampaign : MonoBehaviour
     {
         try
         {
-            string cardFile = FindProjectFile("News", "网页", "图片", "未标题-1-恢复的.png");
             string html = MembershipHtml(
                 MemberId(),
                 PetStory.ComputerName(),
                 AdminPanel.LocalIp(),
-                DataUrl(cardFile),
+                PageImage("275943d13928b0d0a5a227a5fccf41e4.jpg"),
+                PageImage("動畫.gif"),
+                PageImage("符号2.png"),
+                PageImage("未标题-1.png"),
+                PageImage("q.png"),
+                PageImage("q1.png"),
+                PageImage("未标题-1-恢复的.png"),
+                PageImage("kouhao2.png"),
+                PageImage("kouhao1.png"),
+                PageImage("biaoyu.png"),
+                PageImage("diejia.png"),
                 DataUrl(PetJourney.PlayerPhotoFile));
             string path = Path.Combine(Application.persistentDataPath, "TrueBlinkyMembership.html");
             File.WriteAllText(path, html);
@@ -1330,31 +1341,76 @@ public class PetCampaign : MonoBehaviour
         }
     }
 
-    static string MembershipHtml(string id, string name, string location, string cardUrl, string photoUrl)
+    static string PageImage(string file)
+    {
+        return DataUrl(FindProjectFile("News", "网页", "图片", file));
+    }
+
+    static string MembershipHtml(
+        string id,
+        string name,
+        string location,
+        string backgroundUrl,
+        string eyesUrl,
+        string emblemUrl,
+        string titleUrl,
+        string leftEyesUrl,
+        string rightEyesUrl,
+        string cardUrl,
+        string leftSloganUrl,
+        string rightSloganUrl,
+        string mottoUrl,
+        string disclaimerUrl,
+        string photoUrl)
     {
         string face = string.IsNullOrEmpty(cardUrl)
             ? "<div class=\"fallback\"></div>"
-            : "<img class=\"face\" alt=\"Membership\" src=\"" + cardUrl + "\">";
+            : "<img class=\"face\" alt=\"\" src=\"" + cardUrl + "\">";
         string photo = string.IsNullOrEmpty(photoUrl)
             ? ""
             : "<img class=\"photo\" alt=\"\" src=\"" + photoUrl + "\">";
+        string safeName = Html(name);
         return "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Membership</title><style>"
-            + "html,body{margin:0;height:100%;background:#111;}"
-            + "body{display:flex;align-items:center;justify-content:center;}"
-            + ".card{position:relative;width:min(96vw,980px);container-type:inline-size;}"
-            + ".face,.fallback{display:block;width:100%;height:auto;}"
-            + ".fallback{aspect-ratio:1;background:#c8c4c4;}"
+            + "html,body{margin:0;height:100%;background:#000;overflow:hidden;}"
+            + ".stage{position:absolute;left:50%;top:50%;width:1200px;height:900px;margin:-450px 0 0 -600px;transform-origin:center center;background:#000;overflow:hidden;}"
+            + ".stage>img,.t{position:absolute;display:block;}"
+            + ".card{position:absolute;left:313.36px;top:258.12px;width:578.4px;height:534.23px;}"
+            + ".face,.fallback{position:absolute;left:0;top:0;width:100%;height:100%;}"
+            + ".fallback{background:transparent;}"
             + ".photo{position:absolute;left:11.72%;top:35.74%;width:25.78%;height:35.55%;object-fit:cover;object-position:center;}"
-            + ".id,.name,.loc{position:absolute;margin:0;font-family:\"Times New Roman\",Times,serif;font-weight:700;color:#111;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}"
-            + ".id{left:81.05%;top:28.7%;font-size:28px;font-size:3.2cqw;letter-spacing:.04em;max-width:17%;}"
-            + ".name{left:50.8%;top:65.05%;font-size:18px;font-size:2.05cqw;max-width:46%;}"
-            + ".loc{left:56.45%;top:69.4%;font-size:18px;font-size:2.05cqw;max-width:40%;}"
-            + "</style></head><body><main class=\"card\">"
-            + face + photo
-            + "<p class=\"id\">" + Html(id) + "</p>"
-            + "<p class=\"name\">" + Html(name) + "</p>"
-            + "<p class=\"loc\">" + Html(location) + "</p>"
-            + "</main></body></html>";
+            + ".t{margin:0;font-weight:700;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}"
+            + ".welcome{left:529.19px;top:291.93px;width:220px;font:700 23.51px/1.2 \"Courier New\",monospace;color:#ff0000;}"
+            + ".who{left:545.18px;top:319.9px;width:280px;font:700 34.65px/1.2 \"Courier New\",monospace;color:#fff;}"
+            + ".id{left:780.99px;top:406.5px;width:150px;font:700 20.79px/1.2 \"Microsoft YaHei\",\"PingFang SC\",sans-serif;color:#1d1d1f;}"
+            + ".nm{left:615.79px;top:597.22px;width:200px;font:700 20px/1.2 \"Microsoft YaHei\",\"PingFang SC\",sans-serif;color:#1d1d1f;}"
+            + ".loc{left:642.43px;top:622.32px;width:220px;font:700 20.61px/1.2 \"Microsoft YaHei\",\"PingFang SC\",sans-serif;color:#1d1d1f;}"
+            + "</style></head><body><div class=\"stage\">"
+            + Img(backgroundUrl, "-14.39", "-10.12", "1252.53", "947.68")
+            + Img(eyesUrl, "0.27", "77.52", "471.84", "144.63")
+            + Img(emblemUrl, "495.88", "22.15", "209.37", "209.37")
+            + Img(eyesUrl, "723.90", "78.85", "474.28", "133.97")
+            + Img(titleUrl, "471.90", "146.21", "252.00", "201.17")
+            + Img(rightEyesUrl, "834.48", "224.64", "419.65", "626.32")
+            + Img(leftEyesUrl, "-66.32", "229.97", "443.85", "609.00")
+            + "<div class=\"card\">" + face + photo + "</div>"
+            + "<p class=\"t welcome\">WELCOME...</p>"
+            + "<p class=\"t who\">" + safeName + "</p>"
+            + "<p class=\"t id\">" + Html(id) + "</p>"
+            + Img(leftSloganUrl, "17.59", "230.90", "441.20", "37.88")
+            + Img(rightSloganUrl, "746.32", "233.56", "441.20", "36.55")
+            + "<p class=\"t nm\">" + safeName + "</p>"
+            + "<p class=\"t loc\">" + Html(location) + "</p>"
+            + Img(mottoUrl, "481.20", "657.79", "262.68", "202.50")
+            + Img(disclaimerUrl, "331.05", "804.66", "552.00", "107.81")
+            + "</div><script>function fit(){var k=Math.min(innerWidth/1200,innerHeight/900);document.querySelector('.stage').style.transform='scale('+k+')';}addEventListener('resize',fit);fit();</script></body></html>";
+    }
+
+    static string Img(string url, string x, string y, string w, string h)
+    {
+        if (string.IsNullOrEmpty(url))
+            return "";
+
+        return "<img alt=\"\" src=\"" + url + "\" style=\"left:" + x + "px;top:" + y + "px;width:" + w + "px;height:" + h + "px\">";
     }
 
     static string Html(string value)
@@ -1374,7 +1430,13 @@ public class PetCampaign : MonoBehaviour
         if (bytes == null || bytes.Length == 0)
             return null;
 
-        return "data:image/png;base64," + Convert.ToBase64String(bytes);
+        string ext = Path.GetExtension(path);
+        string mime = ".gif".Equals(ext, StringComparison.OrdinalIgnoreCase)
+            ? "image/gif"
+            : (".jpg".Equals(ext, StringComparison.OrdinalIgnoreCase) || ".jpeg".Equals(ext, StringComparison.OrdinalIgnoreCase)
+                ? "image/jpeg"
+                : "image/png");
+        return "data:" + mime + ";base64," + Convert.ToBase64String(bytes);
     }
 
     static string FindProjectFile(params string[] parts)
@@ -1423,18 +1485,26 @@ public class PetCampaign : MonoBehaviour
             string icon = null;
             try
             {
-                string png = FindProjectFile("News", "3.png");
-                if (png == null)
+                icon = Path.Combine(Application.persistentDataPath, "TrueBlinky.ico");
+                string baked = FindProjectFile("News", "TrueBlinky.ico");
+                if (!string.IsNullOrEmpty(baked))
                 {
-                    string art = Path.Combine(Application.dataPath, "ArtResources", "3.png");
-                    if (File.Exists(art))
-                        png = art;
+                    File.Copy(baked, icon, true);
                 }
-
-                if (!string.IsNullOrEmpty(png))
+                else
                 {
-                    icon = Path.Combine(Application.persistentDataPath, "TrueBlinky.ico");
-                    WritePngIcon(png, icon);
+                    string png = FindProjectFile("News", "3.png");
+                    if (png == null)
+                    {
+                        string art = Path.Combine(Application.dataPath, "ArtResources", "3.png");
+                        if (File.Exists(art))
+                            png = art;
+                    }
+
+                    if (!string.IsNullOrEmpty(png))
+                        WritePngIcon(png, icon);
+                    else
+                        icon = null;
                 }
             }
             catch (Exception)

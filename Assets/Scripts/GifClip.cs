@@ -9,6 +9,8 @@ public sealed class GifClip
     public Sprite[] Frames { get; private set; }
     public float[] Delays { get; private set; }
     public Sprite First => Frames != null && Frames.Length > 0 ? Frames[0] : null;
+    public string SourceName { get; set; }
+    public byte[] SourceBytes { get; set; }
 
     public static GifClip Decode(byte[] data)
     {

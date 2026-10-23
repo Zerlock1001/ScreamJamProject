@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using ScreamJam.Audio;
 using ScreamJam.Debugging;
 using UnityEngine;
@@ -65,6 +66,10 @@ public class PetJourney : MonoBehaviour
     bool finalBodyShown = true;
     SpriteRenderer finalBody;
     SpriteRenderer[] finalParts;
+    Transform redEye;
+    Vector3 redEyeRest;
+    bool redEyeReady;
+    const float RedEyeRadius = 0.3f;
     float departUnlockAt;
     bool waitingForDialogue;
     bool homeScriptPending;
@@ -162,8 +167,10 @@ public class PetJourney : MonoBehaviour
 
     void Start()
     {
-        if (PetStory.Current == PetStory.Phase.Final)
+        if (PetStory.Current == PetStory.Phase.Final || PetCampaign.Ensure().HasJoinedCult)
             UseFinalCharacter();
+        else
+            SetFinalChildActive(false);
 
         if (tripCount >= 1)
         {
@@ -415,23 +422,35 @@ public class PetJourney : MonoBehaviour
         SetShown(visible);
     }
 
+    public SpriteRenderer HiddenClickRenderer
+    {
+        get
+        {
+            if (!finalForm || pet == null || pet.enabled || pet.sprite == null)
+                return null;
+            return pet;
+        }
+    }
+
     public void UseFinalCharacter()
     {
         if (!finalForm)
         {
-            GameObject found = FindSceneObject("Final");
+            GameObject found = FindFinalChild();
+            if (found == null)
+                found = FindSceneObject("Final");
             if (found == null)
                 return;
 
             found.SetActive(true);
             finalBody = found.GetComponent<SpriteRenderer>();
-            if (finalBody == null)
-                return;
-
             finalParts = found.GetComponentsInChildren<SpriteRenderer>(true);
+            if (finalBody == null && finalParts != null && finalParts.Length > 0)
+                finalBody = finalParts[0];
             finalForm = true;
-            finalBodyShown = !away && !departing && (pet == null || pet.enabled);
-            CapsuleMenu.UseBody(finalBody);
+            finalBodyShown = !away && !departing;
+            BindRedEye(found.transform);
+            CapsuleMenu.RetainHiddenClick(pet, finalParts);
             if (PetDialogue.Instance != null)
                 PetDialogue.Instance.FollowBody(found.transform);
         }
@@ -439,6 +458,81 @@ public class PetJourney : MonoBehaviour
         if (pet != null)
             pet.enabled = false;
         SetFinalParts(finalBodyShown);
+    }
+
+    void SetFinalChildActive(bool active)
+    {
+        GameObject found = FindFinalChild();
+        if (found != null)
+            found.SetActive(active);
+    }
+
+    GameObject FindFinalChild()
+    {
+        Transform root = pet != null ? pet.transform : transform;
+        for (int i = 0; i < root.childCount; i++)
+        {
+            Transform child = root.GetChild(i);
+            if (child != null && string.Equals(child.name, "Final", StringComparison.OrdinalIgnoreCase))
+                return child.gameObject;
+        }
+
+        return null;
+    }
+
+    void BindRedEye(Transform final)
+    {
+        redEye = FindChildNamed(final, "RedEye");
+        redEyeReady = redEye != null;
+        if (redEyeReady)
+            redEyeRest = redEye.localPosition;
+    }
+
+    static Transform FindChildNamed(Transform root, string objectName)
+    {
+        if (root == null)
+            return null;
+
+        for (int i = 0; i < root.childCount; i++)
+        {
+            Transform child = root.GetChild(i);
+            if (child != null && string.Equals(child.name, objectName, StringComparison.OrdinalIgnoreCase))
+                return child;
+
+            Transform nested = FindChildNamed(child, objectName);
+            if (nested != null)
+                return nested;
+        }
+
+        return null;
+    }
+
+    void TrackRedEye()
+    {
+        if (!finalForm || !redEyeReady || redEye == null)
+            return;
+
+        if (!finalBodyShown || !redEye.gameObject.activeInHierarchy || redEye.parent == null)
+        {
+            redEye.localPosition = redEyeRest;
+            return;
+        }
+
+        Camera cam = Camera.main;
+        if (cam == null)
+            return;
+
+        Vector3 screen = Input.mousePosition;
+        float depth = Mathf.Abs(cam.transform.position.z - redEye.position.z);
+        Vector3 world = cam.ScreenToWorldPoint(new Vector3(screen.x, screen.y, depth));
+        Vector3 mouseLocal = redEye.parent.InverseTransformPoint(world);
+        var offset = new Vector2(mouseLocal.x - redEyeRest.x, mouseLocal.y - redEyeRest.y);
+        if (offset.sqrMagnitude > RedEyeRadius * RedEyeRadius)
+            offset = offset.normalized * RedEyeRadius;
+
+        var target = new Vector3(redEyeRest.x + offset.x, redEyeRest.y + offset.y, redEyeRest.z);
+        float follow = 1f - Mathf.Exp(-14f * Time.unscaledDeltaTime);
+        redEye.localPosition = Vector3.Lerp(redEye.localPosition, target, follow);
     }
 
     static GameObject FindSceneObject(string objectName)
@@ -806,6 +900,8 @@ public class PetJourney : MonoBehaviour
         if (finalForm && pet != null && pet.enabled)
             pet.enabled = false;
 
+        TrackRedEye();
+
         if (!bodyExpected || away || departing || returning || pet == null)
             return;
 
@@ -1088,7 +1184,8 @@ public class PetJourney : MonoBehaviour
             return;
         }
 
-        RememberMeme(clip.First, collectionKey);
+        RememberMeme(clip.First, collectionKey, false);
+        SaveFoundBytes(clip.SourceName, clip.SourceBytes);
         PetPhone.Instance.AddPostcard(clip.First, caption, clip);
     }
 
@@ -1127,6 +1224,12 @@ public class PetJourney : MonoBehaviour
             return null;
 
         cache = GifClip.Decode(bytes);
+        if (cache != null)
+        {
+            cache.SourceName = fileName;
+            cache.SourceBytes = bytes;
+        }
+
         return cache;
     }
 
@@ -1233,7 +1336,7 @@ public class PetJourney : MonoBehaviour
 
             System.IO.File.WriteAllText(
                 System.IO.Path.Combine(dir, "blinky-note.txt"),
-                "I want to see every (OMNIS) place in the world. Maybe the admin panel has other functions that can help me do that.\r\n");
+                "I want to see OMNIS place in the world. Maybe my developer has some thing good for me. https://zerzhou.itch.io/blinky\r\n");
             DebugConsole.WriteLine("Left blinky-note.txt on the desktop.");
         }
         catch (Exception ex)
@@ -1955,12 +2058,13 @@ public class PetJourney : MonoBehaviour
         SetJourneyButtonVisible(true);
     }
 
-    void RememberMeme(Sprite sprite, string forcedKey = null)
+    void RememberMeme(Sprite sprite, string forcedKey = null, bool saveFile = true)
     {
         if (sprite == null)
             return;
 
-        if (!collectedMemes.Contains(sprite))
+        bool added = !collectedMemes.Contains(sprite);
+        if (added)
             collectedMemes.Add(sprite);
 
         string key = string.IsNullOrEmpty(forcedKey) ? sprite.name : forcedKey;
@@ -1968,7 +2072,11 @@ public class PetJourney : MonoBehaviour
         {
             collectedMemeKeys.Add(key);
             SaveCollectedMemes();
+            added = true;
         }
+
+        if (saveFile && added)
+            SaveFoundPicture(sprite);
     }
 
     void SaveCollectedMemes()
@@ -2123,6 +2231,122 @@ public class PetJourney : MonoBehaviour
         {
             return null;
         }
+    }
+
+    static void SaveFoundPicture(Sprite sprite)
+    {
+        if (sprite == null || sprite.name == "PlaceholderMeme")
+            return;
+
+        try
+        {
+            string folder = EnsureCollectionsFolder();
+            if (string.IsNullOrEmpty(folder))
+                return;
+
+            string source = SourceFile(sprite);
+            if (!string.IsNullOrEmpty(source))
+            {
+                string dest = Path.Combine(folder, Path.GetFileName(source));
+                if (!File.Exists(dest))
+                    File.Copy(source, dest, false);
+                return;
+            }
+
+            if (sprite.texture == null || !sprite.texture.isReadable)
+                return;
+
+            byte[] png = sprite.texture.EncodeToPNG();
+            if (png == null || png.Length == 0)
+                return;
+
+            string name = string.IsNullOrEmpty(sprite.name) ? "picture.png" : SanitizeFileName(sprite.name) + ".png";
+            File.WriteAllBytes(UniqueFile(folder, name), png);
+        }
+        catch (Exception ex)
+        {
+            DebugConsole.WriteLine("Could not save a collection picture: " + ex.Message);
+        }
+    }
+
+    static void SaveFoundBytes(string fileName, byte[] bytes)
+    {
+        if (string.IsNullOrEmpty(fileName) || bytes == null || bytes.Length == 0)
+            return;
+
+        try
+        {
+            string folder = EnsureCollectionsFolder();
+            if (string.IsNullOrEmpty(folder))
+                return;
+
+            string dest = Path.Combine(folder, SanitizeFileName(fileName));
+            if (!File.Exists(dest))
+                File.WriteAllBytes(dest, bytes);
+        }
+        catch (Exception ex)
+        {
+            DebugConsole.WriteLine("Could not save a collection picture: " + ex.Message);
+        }
+    }
+
+    static string EnsureCollectionsFolder()
+    {
+        string desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        if (string.IsNullOrEmpty(desktop))
+            return null;
+
+        string folder = Path.Combine(desktop, "Collections");
+        Directory.CreateDirectory(folder);
+        return folder;
+    }
+
+    static string SourceFile(Sprite sprite)
+    {
+#if UNITY_EDITOR
+        string assetPath = UnityEditor.AssetDatabase.GetAssetPath(sprite);
+        if (string.IsNullOrEmpty(assetPath) && sprite.texture != null)
+            assetPath = UnityEditor.AssetDatabase.GetAssetPath(sprite.texture);
+        if (!string.IsNullOrEmpty(assetPath) && assetPath.StartsWith("Assets/"))
+        {
+            string full = Path.GetFullPath(Path.Combine(Application.dataPath, "..", assetPath));
+            if (File.Exists(full))
+                return full;
+        }
+#endif
+        return null;
+    }
+
+    static string UniqueFile(string folder, string fileName)
+    {
+        string dest = Path.Combine(folder, fileName);
+        if (!File.Exists(dest))
+            return dest;
+
+        string stem = Path.GetFileNameWithoutExtension(fileName);
+        string ext = Path.GetExtension(fileName);
+        for (int i = 2; i < 1000; i++)
+        {
+            dest = Path.Combine(folder, stem + " (" + i + ")" + ext);
+            if (!File.Exists(dest))
+                return dest;
+        }
+
+        return Path.Combine(folder, stem + "-" + DateTime.UtcNow.Ticks + ext);
+    }
+
+    static string SanitizeFileName(string name)
+    {
+        char[] bad = Path.GetInvalidFileNameChars();
+        var chars = name.ToCharArray();
+        for (int i = 0; i < chars.Length; i++)
+        {
+            if (Array.IndexOf(bad, chars[i]) >= 0)
+                chars[i] = '_';
+        }
+
+        string clean = new string(chars).Trim();
+        return string.IsNullOrEmpty(clean) ? "picture" : clean;
     }
 
     float CurrentMood()
@@ -2529,7 +2753,9 @@ public class PetJourney : MonoBehaviour
 
         texture.SetPixels(pixels);
         texture.Apply();
-        return Sprite.Create(texture, new Rect(0f, 0f, size, size), new Vector2(0.5f, 0.5f), 100f);
+        Sprite sprite = Sprite.Create(texture, new Rect(0f, 0f, size, size), new Vector2(0.5f, 0.5f), 100f);
+        sprite.name = "PlaceholderMeme";
+        return sprite;
     }
 
     void BindGalleryButton()

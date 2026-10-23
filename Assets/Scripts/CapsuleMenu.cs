@@ -31,11 +31,23 @@ public class CapsuleMenu : MonoBehaviour
             return;
 
         instance.capsule = body;
+        instance.hiddenBodyClickable = false;
         instance.hitRenderers = body.GetComponentsInChildren<SpriteRenderer>(true);
+    }
+
+    public static void RetainHiddenClick(SpriteRenderer body, SpriteRenderer[] alsoVisible)
+    {
+        if (instance == null || body == null)
+            return;
+
+        instance.capsule = body;
+        instance.hiddenBodyClickable = true;
+        instance.hitRenderers = alsoVisible;
     }
 
     SpriteRenderer capsule;
     SpriteRenderer[] hitRenderers;
+    bool hiddenBodyClickable;
     Camera cam;
     SpriteRenderer panelRenderer;
     GameObject panelObject;
@@ -101,7 +113,8 @@ public class CapsuleMenu : MonoBehaviour
 
         if (cam == null)
             cam = Camera.main;
-        if (capsule == null || !capsule.enabled || cam == null || !PetDialogue.HasPlayerName)
+        bool bodyClickable = capsule != null && (capsule.enabled || hiddenBodyClickable);
+        if (!bodyClickable || cam == null || !PetDialogue.HasPlayerName)
         {
             if (menuVisible)
                 SetMenuVisible(false);
@@ -480,14 +493,55 @@ public class CapsuleMenu : MonoBehaviour
 
     bool HitsCapsule(Vector2 screenPoint)
     {
-        if (capsule == null || cam == null || capsule.sprite == null || !capsule.enabled)
+        if (capsule == null || cam == null || capsule.sprite == null)
+            return false;
+        if (!capsule.enabled && !hiddenBodyClickable)
             return false;
 
-        Bounds bounds = HitBounds();
+        if (hiddenBodyClickable)
+        {
+            if (ContainsBounds(screenPoint, WorldSpriteBounds(capsule)))
+                return true;
+
+            if (hitRenderers == null)
+                return false;
+
+            for (int i = 0; i < hitRenderers.Length; i++)
+            {
+                SpriteRenderer renderer = hitRenderers[i];
+                if (renderer == null || !renderer.enabled || renderer.sprite == null)
+                    continue;
+                if (ContainsBounds(screenPoint, renderer.bounds))
+                    return true;
+            }
+
+            return false;
+        }
+
+        return ContainsBounds(screenPoint, HitBounds());
+    }
+
+    bool ContainsBounds(Vector2 screenPoint, Bounds bounds)
+    {
+        if (cam == null || bounds.size.sqrMagnitude <= 0.000001f)
+            return false;
+
         float depth = Mathf.Abs(cam.transform.position.z - bounds.center.z);
         Vector3 world = cam.ScreenToWorldPoint(new Vector3(screenPoint.x, screenPoint.y, depth));
         world.z = bounds.center.z;
         return bounds.Contains(world);
+    }
+
+    static Bounds WorldSpriteBounds(SpriteRenderer renderer)
+    {
+        Bounds local = renderer.sprite.bounds;
+        Vector3 center = renderer.transform.TransformPoint(local.center);
+        Vector3 scale = renderer.transform.lossyScale;
+        var size = new Vector3(
+            Mathf.Abs(local.size.x * scale.x),
+            Mathf.Abs(local.size.y * scale.y),
+            Mathf.Abs(local.size.z * scale.z));
+        return new Bounds(center, size);
     }
 
     Bounds HitBounds()

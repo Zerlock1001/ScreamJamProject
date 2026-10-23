@@ -674,44 +674,12 @@ public class DesktopPetWindow : MonoBehaviour
             SpriteRenderer renderer = renderers[i];
             if (renderer == null || !renderer.enabled || !renderer.gameObject.activeInHierarchy)
                 continue;
-            if (renderer.sprite == null || renderer.color.a <= clickAlphaThreshold)
-                continue;
-
-            var sample = new SpriteSample
-            {
-                worldToLocal = renderer.transform.worldToLocalMatrix,
-                planePoint = renderer.transform.position,
-                planeNormal = renderer.transform.forward,
-                bounds = renderer.sprite.bounds,
-                colorAlpha = renderer.color.a,
-                flipX = renderer.flipX,
-                flipY = renderer.flipY,
-                textureRect = renderer.sprite.textureRect
-            };
-
-            Texture2D texture = renderer.sprite.texture;
-            if (texture != null && texture.isReadable)
-            {
-                int id = texture.GetInstanceID();
-                if (!pixelCache.TryGetValue(id, out Color32[] pixels) || pixels == null || pixels.Length != texture.width * texture.height)
-                {
-                    pixels = texture.GetPixels32();
-                    pixelCache[id] = pixels;
-                }
-
-                sample.readable = true;
-                sample.texWidth = texture.width;
-                sample.texHeight = texture.height;
-                sample.pixels = pixels;
-            }
-
-            samples.Add(sample);
-            if (TryGetSpriteScreenRect(sample, out Rect spriteRect))
-            {
-                scratchSprites.Add(spriteRect);
-                AddClientRect(spriteRect);
-            }
+            TryAddSpriteSample(renderer);
         }
+
+        SpriteRenderer hidden = PetJourney.Instance != null ? PetJourney.Instance.HiddenClickRenderer : null;
+        if (hidden != null)
+            TryAddSpriteSample(hidden);
 
         CollectGraphics();
         sampleSnapshot = samples.ToArray();
@@ -719,6 +687,49 @@ public class DesktopPetWindow : MonoBehaviour
         spriteScreenSnapshot = scratchSprites.ToArray();
         clientSnapshot = scratchClient.ToArray();
         spritesFullyMapped = scratchSprites.Count == samples.Count;
+    }
+
+    void TryAddSpriteSample(SpriteRenderer renderer)
+    {
+        if (renderer == null || renderer.sprite == null || renderer.color.a <= clickAlphaThreshold)
+            return;
+
+        var sample = new SpriteSample
+        {
+            worldToLocal = renderer.transform.worldToLocalMatrix,
+            planePoint = renderer.transform.position,
+            planeNormal = renderer.transform.forward,
+            bounds = renderer.sprite.bounds,
+            colorAlpha = renderer.color.a,
+            flipX = renderer.flipX,
+            flipY = renderer.flipY,
+            textureRect = renderer.sprite.textureRect
+        };
+
+        Texture2D texture = renderer.sprite.texture;
+        if (texture != null && texture.isReadable)
+        {
+            int id = texture.GetInstanceID();
+            Color32[] pixels;
+            if (!pixelCache.TryGetValue(id, out pixels) || pixels == null || pixels.Length != texture.width * texture.height)
+            {
+                pixels = texture.GetPixels32();
+                pixelCache[id] = pixels;
+            }
+
+            sample.readable = true;
+            sample.texWidth = texture.width;
+            sample.texHeight = texture.height;
+            sample.pixels = pixels;
+        }
+
+        samples.Add(sample);
+        Rect spriteRect;
+        if (TryGetSpriteScreenRect(sample, out spriteRect))
+        {
+            scratchSprites.Add(spriteRect);
+            AddClientRect(spriteRect);
+        }
     }
 
     void CollectGraphics()
