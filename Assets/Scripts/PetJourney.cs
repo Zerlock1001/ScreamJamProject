@@ -829,6 +829,10 @@ public class PetJourney : MonoBehaviour
         if (!moodWidget.gameObject.activeSelf)
             moodWidget.gameObject.SetActive(true);
 
+        float homeScaleX = homeScale.x > 0.0001f ? homeScale.x : 0.5f;
+        float scale = Mathf.Clamp01(pet.transform.localScale.x / homeScaleX);
+        moodWidget.localScale = Vector3.one * scale;
+
         Camera cam = Camera.main;
         Canvas canvas = moodWidget.GetComponentInParent<Canvas>();
         RectTransform canvasRect = canvas != null ? canvas.transform as RectTransform : null;

@@ -19,6 +19,12 @@ public class PetPhone : MonoBehaviour
     GameObject visual;
     CanvasGroup phoneGroup;
     GameObject phoneIcon;
+    RectTransform phoneIconRect;
+    GameObject unreadBadge;
+    Text unreadBadgeText;
+    Vector2 phoneIconBasePosition;
+    int unreadCount;
+    Coroutine phoneShakeRoutine;
     Text emptyChatText;
     Button launcher;
     int pictureWindows;
@@ -167,6 +173,12 @@ public class PetPhone : MonoBehaviour
             return;
 
         phoneOpen = open;
+
+        if (phoneOpen)
+        {
+            ClearUnread();
+            StopIconShake();
+        }
 
         if (phoneAnimRoutine != null)
         {
@@ -363,6 +375,7 @@ public class PetPhone : MonoBehaviour
         labelRect.offsetMin = new Vector2(BubblePadX, BubblePadY);
         labelRect.offsetMax = new Vector2(-BubblePadX, -BubblePadY);
         StartCoroutine(ScrollToBottom());
+        NotifyNewMessage();
     }
 
     public void RemoveLastPostcard()
@@ -442,6 +455,7 @@ public class PetPhone : MonoBehaviour
         captionObject.GetComponent<LayoutElement>().preferredHeight = 22f;
 
         StartCoroutine(ScrollToBottom());
+        NotifyNewMessage();
     }
 
     static float PreferredTextHeight(Text label, float width)
@@ -618,68 +632,130 @@ public class PetPhone : MonoBehaviour
             typeof(Button),
             typeof(Shadow));
         phoneIcon.transform.SetParent(canvas.transform, false);
-        var rect = phoneIcon.GetComponent<RectTransform>();
-        rect.anchorMin = new Vector2(1f, 0f);
-        rect.anchorMax = new Vector2(1f, 0f);
-        rect.pivot = new Vector2(1f, 0f);
-        rect.anchoredPosition = new Vector2(-24f, 24f);
-        rect.sizeDelta = new Vector2(56f, 72f);
+        phoneIconRect = phoneIcon.GetComponent<RectTransform>();
+        phoneIconRect.anchorMin = new Vector2(1f, 0f);
+        phoneIconRect.anchorMax = new Vector2(1f, 0f);
+        phoneIconRect.pivot = new Vector2(1f, 0f);
+        phoneIconRect.anchoredPosition = new Vector2(-24f, 24f);
+        phoneIconRect.sizeDelta = new Vector2(54f, 81f);
+        phoneIconBasePosition = phoneIconRect.anchoredPosition;
 
         var body = phoneIcon.GetComponent<Image>();
-        body.sprite = BubbleSprite();
-        body.type = Image.Type.Sliced;
-        body.color = new Color(0.15f, 0.16f, 0.19f, 1f);
+        body.sprite = PixelPhoneSprite();
+        body.type = Image.Type.Simple;
+        body.preserveAspect = true;
+        body.color = Color.white;
         body.raycastTarget = true;
 
         var shadow = phoneIcon.GetComponent<Shadow>();
-        shadow.effectColor = new Color(0f, 0f, 0f, 0.22f);
+        shadow.effectColor = new Color(0f, 0f, 0f, 0.25f);
         shadow.effectDistance = new Vector2(0f, -3f);
-
-        var screenObject = new GameObject("Screen", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
-        screenObject.transform.SetParent(phoneIcon.transform, false);
-        var screenRect = screenObject.GetComponent<RectTransform>();
-        screenRect.anchorMin = Vector2.zero;
-        screenRect.anchorMax = Vector2.one;
-        screenRect.offsetMin = new Vector2(8f, 16f);
-        screenRect.offsetMax = new Vector2(-8f, -14f);
-        var screenImage = screenObject.GetComponent<Image>();
-        screenImage.sprite = BubbleSprite();
-        screenImage.type = Image.Type.Sliced;
-        screenImage.color = new Color(0.82f, 0.90f, 0.96f, 1f);
-        screenImage.raycastTarget = false;
-
-        var speakerObject = new GameObject("Speaker", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
-        speakerObject.transform.SetParent(phoneIcon.transform, false);
-        var speakerRect = speakerObject.GetComponent<RectTransform>();
-        speakerRect.anchorMin = new Vector2(0.5f, 1f);
-        speakerRect.anchorMax = new Vector2(0.5f, 1f);
-        speakerRect.pivot = new Vector2(0.5f, 1f);
-        speakerRect.anchoredPosition = new Vector2(0f, -7f);
-        speakerRect.sizeDelta = new Vector2(18f, 3f);
-        var speakerImage = speakerObject.GetComponent<Image>();
-        speakerImage.sprite = Skin();
-        speakerImage.type = Image.Type.Simple;
-        speakerImage.color = new Color(0.55f, 0.58f, 0.62f, 1f);
-        speakerImage.raycastTarget = false;
-
-        var homeObject = new GameObject("Home", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
-        homeObject.transform.SetParent(phoneIcon.transform, false);
-        var homeRect = homeObject.GetComponent<RectTransform>();
-        homeRect.anchorMin = new Vector2(0.5f, 0f);
-        homeRect.anchorMax = new Vector2(0.5f, 0f);
-        homeRect.pivot = new Vector2(0.5f, 0f);
-        homeRect.anchoredPosition = new Vector2(0f, 6f);
-        homeRect.sizeDelta = new Vector2(8f, 8f);
-        var homeImage = homeObject.GetComponent<Image>();
-        homeImage.sprite = Skin();
-        homeImage.type = Image.Type.Simple;
-        homeImage.color = new Color(0.55f, 0.58f, 0.62f, 1f);
-        homeImage.raycastTarget = false;
 
         var button = phoneIcon.GetComponent<Button>();
         button.targetGraphic = body;
         button.onClick.AddListener(Toggle);
+
+        CreateUnreadBadge();
         phoneIcon.transform.SetAsLastSibling();
+    }
+
+    void CreateUnreadBadge()
+    {
+        unreadBadge = new GameObject("UnreadBadge", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        unreadBadge.transform.SetParent(phoneIcon.transform, false);
+        var rect = unreadBadge.GetComponent<RectTransform>();
+        rect.anchorMin = new Vector2(1f, 1f);
+        rect.anchorMax = new Vector2(1f, 1f);
+        rect.pivot = new Vector2(0.5f, 0.5f);
+        rect.anchoredPosition = new Vector2(1f, 1f);
+        rect.sizeDelta = new Vector2(20f, 20f);
+
+        var image = unreadBadge.GetComponent<Image>();
+        image.sprite = BadgeSprite();
+        image.type = Image.Type.Simple;
+        image.color = Color.white;
+        image.raycastTarget = false;
+
+        var textObject = new GameObject("Count", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text));
+        textObject.transform.SetParent(unreadBadge.transform, false);
+        var textRect = textObject.GetComponent<RectTransform>();
+        textRect.anchorMin = Vector2.zero;
+        textRect.anchorMax = Vector2.one;
+        textRect.offsetMin = Vector2.zero;
+        textRect.offsetMax = Vector2.zero;
+        unreadBadgeText = textObject.GetComponent<Text>();
+        unreadBadgeText.font = BuiltinFont();
+        unreadBadgeText.fontSize = 11;
+        unreadBadgeText.fontStyle = FontStyle.Bold;
+        unreadBadgeText.alignment = TextAnchor.MiddleCenter;
+        unreadBadgeText.color = Color.white;
+        unreadBadgeText.raycastTarget = false;
+        unreadBadgeText.horizontalOverflow = HorizontalWrapMode.Overflow;
+        unreadBadgeText.verticalOverflow = VerticalWrapMode.Overflow;
+        unreadBadgeText.text = string.Empty;
+        unreadBadge.SetActive(false);
+    }
+
+    void NotifyNewMessage()
+    {
+        if (phoneOpen || phoneIcon == null || unreadBadge == null)
+            return;
+
+        unreadCount++;
+        UpdateUnreadBadge();
+        if (phoneShakeRoutine != null)
+            StopCoroutine(phoneShakeRoutine);
+        phoneShakeRoutine = StartCoroutine(ShakePhoneIcon());
+    }
+
+    void UpdateUnreadBadge()
+    {
+        if (unreadBadge == null)
+            return;
+
+        bool show = unreadCount > 0;
+        unreadBadge.SetActive(show);
+        if (show && unreadBadgeText != null)
+            unreadBadgeText.text = unreadCount > 99 ? "99+" : unreadCount.ToString();
+    }
+
+    void ClearUnread()
+    {
+        unreadCount = 0;
+        UpdateUnreadBadge();
+    }
+
+    void StopIconShake()
+    {
+        if (phoneShakeRoutine != null)
+        {
+            StopCoroutine(phoneShakeRoutine);
+            phoneShakeRoutine = null;
+        }
+
+        if (phoneIconRect != null)
+            phoneIconRect.anchoredPosition = phoneIconBasePosition;
+    }
+
+    IEnumerator ShakePhoneIcon()
+    {
+        if (phoneIconRect == null)
+            yield break;
+
+        const float duration = 0.42f;
+        float elapsed = 0f;
+        while (elapsed < duration)
+        {
+            elapsed += Time.unscaledDeltaTime;
+            float t = Mathf.Clamp01(elapsed / duration);
+            float damping = 1f - t;
+            float offset = Mathf.Sin(t * Mathf.PI * 6f) * 5f * damping;
+            phoneIconRect.anchoredPosition = phoneIconBasePosition + new Vector2(offset, 0f);
+            yield return null;
+        }
+
+        phoneIconRect.anchoredPosition = phoneIconBasePosition;
+        phoneShakeRoutine = null;
     }
 
     void Build()
@@ -853,7 +929,110 @@ public class PetPhone : MonoBehaviour
 
     static Sprite skinSprite;
     static Sprite bubbleSprite;
+    static Sprite pixelPhoneSprite;
+    static Sprite badgeSprite;
     static Sprite pictureIcon;
+
+    static Sprite PixelPhoneSprite()
+    {
+        if (pixelPhoneSprite != null)
+            return pixelPhoneSprite;
+
+        const int width = 16;
+        const int height = 24;
+        var texture = new Texture2D(width, height, TextureFormat.RGBA32, false);
+        texture.filterMode = FilterMode.Point;
+        texture.wrapMode = TextureWrapMode.Clamp;
+        var pixels = new Color[width * height];
+        var clear = new Color(0f, 0f, 0f, 0f);
+        var casing = new Color(0.13f, 0.14f, 0.18f, 1f);
+        var edge = new Color(0.55f, 0.58f, 0.64f, 1f);
+        var screen = new Color(0.55f, 0.78f, 0.92f, 1f);
+        var screenLight = new Color(0.78f, 0.91f, 0.98f, 1f);
+        var buttonColor = new Color(0.68f, 0.72f, 0.78f, 1f);
+
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                Color color = clear;
+                bool outside = x < 1 || x > width - 2 || y < 1 || y > height - 2;
+                bool corner = (x == 1 || x == width - 2) && (y == 1 || y == height - 2);
+                if (!outside && !corner)
+                {
+                    color = casing;
+                    if (x == 1 || x == width - 2 || y == 1 || y == height - 2)
+                        color = edge;
+
+                    if (x >= 2 && x <= width - 3 && y >= 4 && y <= height - 5)
+                        color = edge;
+                    if (x >= 3 && x <= width - 4 && y >= 5 && y <= height - 6)
+                        color = screen;
+                    if (x >= 4 && x <= width - 5 && y >= height - 7 && y <= height - 6)
+                        color = screenLight;
+                }
+
+                if (x >= 6 && x <= 9 && y >= height - 4 && y <= height - 3)
+                    color = buttonColor;
+                if (x >= 6 && x <= 9 && y >= 2 && y <= 3)
+                    color = buttonColor;
+                if (x == width - 1 && y >= 9 && y <= 13)
+                    color = edge;
+
+                pixels[y * width + x] = color;
+            }
+        }
+
+        texture.SetPixels(pixels);
+        texture.Apply(false, false);
+        texture.hideFlags = HideFlags.HideAndDontSave;
+        pixelPhoneSprite = Sprite.Create(
+            texture,
+            new Rect(0f, 0f, width, height),
+            new Vector2(0.5f, 0.5f),
+            100f);
+        pixelPhoneSprite.hideFlags = HideFlags.HideAndDontSave;
+        return pixelPhoneSprite;
+    }
+
+    static Sprite BadgeSprite()
+    {
+        if (badgeSprite != null)
+            return badgeSprite;
+
+        const int size = 16;
+        var texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        texture.filterMode = FilterMode.Point;
+        texture.wrapMode = TextureWrapMode.Clamp;
+        var pixels = new Color[size * size];
+        float center = (size - 1) * 0.5f;
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                float dx = x - center;
+                float dy = y - center;
+                float distance = Mathf.Sqrt(dx * dx + dy * dy);
+                if (distance > 7.5f)
+                    pixels[y * size + x] = new Color(1f, 1f, 1f, 0f);
+                else if (distance > 6.4f)
+                    pixels[y * size + x] = Color.white;
+                else
+                    pixels[y * size + x] = new Color(0.86f, 0.20f, 0.23f, 1f);
+            }
+        }
+
+        texture.SetPixels(pixels);
+        texture.Apply(false, false);
+        texture.hideFlags = HideFlags.HideAndDontSave;
+        badgeSprite = Sprite.Create(
+            texture,
+            new Rect(0f, 0f, size, size),
+            new Vector2(0.5f, 0.5f),
+            100f);
+        badgeSprite.hideFlags = HideFlags.HideAndDontSave;
+        return badgeSprite;
+    }
 
     static Sprite BubbleSprite()
     {
