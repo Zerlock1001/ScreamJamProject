@@ -9,7 +9,7 @@
 
 var lunaaa = {
   displayName: "Cosimo Lunus",
-  handle: "cosimolunus",
+  handle: "cosimolunus67",
   avatarSrc: "assets/lunaaa.jpg",
   tone: "slate"
 };
