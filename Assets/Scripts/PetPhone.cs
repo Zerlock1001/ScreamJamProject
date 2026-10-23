@@ -1249,12 +1249,9 @@ public class PetPhone : MonoBehaviour
         texture.wrapMode = TextureWrapMode.Clamp;
         var pixels = new Color[size * size];
         var clear = new Color(0f, 0f, 0f, 0f);
-        var back = new Color(0.20f, 0.52f, 0.78f, 1f);
-        var border = new Color(0.42f, 0.78f, 0.96f, 1f);
-        var skin = new Color(0.95f, 0.78f, 0.62f, 1f);
-        var hair = new Color(0.15f, 0.17f, 0.25f, 1f);
-        var shirt = new Color(0.90f, 0.92f, 0.96f, 1f);
-        var eye = new Color(0.10f, 0.12f, 0.18f, 1f);
+        var back = new Color(0.94f, 0.94f, 0.95f, 1f);
+        var border = new Color(0.74f, 0.74f, 0.76f, 1f);
+        var silhouette = new Color(0.56f, 0.56f, 0.59f, 1f);
         float center = (size - 1) * 0.5f;
 
         for (int y = 0; y < size; y++)
@@ -1274,17 +1271,15 @@ public class PetPhone : MonoBehaviour
 
                 float headDx = x - 12f;
                 float headDy = y - 15f;
-                if (headDx * headDx + headDy * headDy <= 10.5f)
-                    color = skin;
+                if (headDx * headDx + headDy * headDy <= 21.2f)
+                    color = silhouette;
 
-                if (y >= 16 && y <= 19 && x >= 8 && x <= 15)
-                    color = hair;
-
-                if ((x == 10 || x == 14) && y == 15)
-                    color = eye;
-
-                if (y <= 10 && y >= 5 && Mathf.Abs(x - center) <= (y - 3) * 0.9f)
-                    color = shirt;
+                if (y >= 2 && y <= 10)
+                {
+                    float halfWidth = 5.6f + (10 - y) * 0.55f;
+                    if (Mathf.Abs(x - center) <= halfWidth)
+                        color = silhouette;
+                }
 
                 pixels[y * size + x] = color;
             }

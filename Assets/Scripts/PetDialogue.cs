@@ -655,7 +655,7 @@ public class PetDialogue : MonoBehaviour
         accentRect.pivot = new Vector2(0.5f, 1f);
         accentRect.anchoredPosition = new Vector2(0f, -10f);
         accentRect.sizeDelta = new Vector2(0f, 3f);
-        accent.GetComponent<Image>().color = new Color(0.93f, 0.55f, 0.42f, 1f);
+        accent.GetComponent<Image>().color = new Color(0.08f, 0.08f, 0.09f, 1f);
         accent.GetComponent<Image>().raycastTarget = false;
 
         Font font = BuiltinFont();
@@ -797,8 +797,8 @@ public class PetDialogue : MonoBehaviour
 
         var pixels = new Color32[size * size];
         Color32 clear = new Color32(0, 0, 0, 0);
-        Color32 fill = new Color32(248, 239, 224, 255);
-        Color32 edge = new Color32(92, 58, 40, 255);
+        Color32 fill = new Color32(248, 248, 248, 255);
+        Color32 edge = new Color32(18, 18, 20, 255);
 
         for (int y = 0; y < size; y++)
         {
@@ -845,7 +845,7 @@ public class PetDialogue : MonoBehaviour
             20,
             FontStyle.Bold,
             TextAnchor.MiddleCenter,
-            new Color(0.24f, 0.16f, 0.12f, 1f),
+            new Color(0.07f, 0.07f, 0.08f, 1f),
             new Vector2(0f, 1f),
             new Vector2(1f, 1f),
             new Vector2(0.5f, 1f),
@@ -860,7 +860,7 @@ public class PetDialogue : MonoBehaviour
             12,
             FontStyle.Italic,
             TextAnchor.MiddleCenter,
-            new Color(0.46f, 0.34f, 0.26f, 1f),
+            new Color(0.07f, 0.07f, 0.08f, 0.5f),
             new Vector2(0f, 1f),
             new Vector2(1f, 1f),
             new Vector2(0.5f, 1f),
@@ -921,9 +921,9 @@ public class PetDialogue : MonoBehaviour
         image.type = Image.Type.Sliced;
         image.color = Color.white;
 
-        var text = CreateInputText(inputObject.transform, font, "Text", new Color(0.20f, 0.14f, 0.10f, 1f), FontStyle.Normal);
+        var text = CreateInputText(inputObject.transform, font, "Text", new Color(0.07f, 0.07f, 0.08f, 1f), FontStyle.Normal);
         text.text = string.Empty;
-        var placeholder = CreateInputText(inputObject.transform, font, "Placeholder", new Color(0.55f, 0.48f, 0.42f, 1f), FontStyle.Italic);
+        var placeholder = CreateInputText(inputObject.transform, font, "Placeholder", new Color(0.07f, 0.07f, 0.08f, 0.42f), FontStyle.Italic);
         placeholder.text = "Type your name";
 
         var input = inputObject.GetComponent<InputField>();
@@ -932,8 +932,8 @@ public class PetDialogue : MonoBehaviour
         input.placeholder = placeholder;
         input.lineType = InputField.LineType.SingleLine;
         input.characterLimit = 24;
-        input.caretColor = new Color(0.24f, 0.16f, 0.12f, 1f);
-        input.selectionColor = new Color(0.93f, 0.55f, 0.42f, 0.35f);
+        input.caretColor = new Color(0.07f, 0.07f, 0.08f, 1f);
+        input.selectionColor = new Color(0.07f, 0.07f, 0.08f, 0.2f);
         input.onSubmit.AddListener(FinishNamePrompt);
         return input;
     }
@@ -972,7 +972,7 @@ public class PetDialogue : MonoBehaviour
         var image = buttonObject.GetComponent<Image>();
         image.sprite = PromptPanelSprite();
         image.type = Image.Type.Sliced;
-        image.color = new Color(0.93f, 0.55f, 0.42f, 1f);
+        image.color = new Color(0.90f, 0.90f, 0.91f, 1f);
         image.raycastTarget = true;
 
         var button = buttonObject.GetComponent<Button>();
@@ -987,7 +987,7 @@ public class PetDialogue : MonoBehaviour
             15,
             FontStyle.Bold,
             TextAnchor.MiddleCenter,
-            new Color(0.24f, 0.14f, 0.10f, 1f),
+            new Color(0.06f, 0.06f, 0.07f, 1f),
             Vector2.zero,
             Vector2.one,
             new Vector2(0.5f, 0.5f),
