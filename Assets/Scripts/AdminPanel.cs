@@ -42,8 +42,7 @@ public class AdminPanel : MonoBehaviour
     Text roleText;
     Text statusText;
     Text terminalText;
-    ScrollRect terminalScroll;
-    RectTransform terminalContent;
+    RectTransform terminalViewport;
     Coroutine outputRoutine;
     Coroutine verifyRoutine;
     bool verifying;
@@ -250,12 +249,15 @@ public class AdminPanel : MonoBehaviour
     IEnumerator ScrollTerminalToBottom()
     {
         yield return null;
-        if (terminalContent == null || terminalScroll == null)
+        if (terminalText == null || terminalViewport == null)
             yield break;
 
         Canvas.ForceUpdateCanvases();
-        LayoutRebuilder.ForceRebuildLayoutImmediate(terminalContent);
-        terminalScroll.verticalNormalizedPosition = 0f;
+        RectTransform textRect = terminalText.rectTransform;
+        float height = terminalText.preferredHeight;
+        textRect.sizeDelta = new Vector2(0f, height);
+        float overflow = Mathf.Max(0f, height - terminalViewport.rect.height);
+        textRect.anchoredPosition = new Vector2(0f, -overflow);
     }
 
     void GenerateColorSequence()
@@ -520,51 +522,23 @@ public class AdminPanel : MonoBehaviour
         terminalOutline.effectColor = new Color(0.72f, 0.72f, 0.74f, 0.26f);
         terminalOutline.effectDistance = new Vector2(1f, -1f);
 
-        var scrollObject = new GameObject("OutputScroll", typeof(RectTransform), typeof(ScrollRect));
-        scrollObject.transform.SetParent(terminal, false);
-        var scrollObjectRect = scrollObject.GetComponent<RectTransform>();
-        scrollObjectRect.anchorMin = Vector2.zero;
-        scrollObjectRect.anchorMax = Vector2.one;
-        scrollObjectRect.offsetMin = new Vector2(20f, 52f);
-        scrollObjectRect.offsetMax = new Vector2(-20f, -12f);
-
-        terminalScroll = scrollObject.GetComponent<ScrollRect>();
-        terminalScroll.horizontal = false;
-        terminalScroll.vertical = true;
-        terminalScroll.movementType = ScrollRect.MovementType.Clamped;
-        terminalScroll.scrollSensitivity = 30f;
-
         var viewportObject = new GameObject(
-            "Viewport",
+            "OutputViewport",
             typeof(RectTransform),
-            typeof(CanvasRenderer),
-            typeof(Image),
-            typeof(Mask));
-        viewportObject.transform.SetParent(scrollObject.transform, false);
-        var viewportRect = viewportObject.GetComponent<RectTransform>();
-        viewportRect.anchorMin = Vector2.zero;
-        viewportRect.anchorMax = Vector2.one;
-        viewportRect.offsetMin = Vector2.zero;
-        viewportRect.offsetMax = Vector2.zero;
-        var viewportImage = viewportObject.GetComponent<Image>();
-        viewportImage.color = new Color(0f, 0f, 0f, 0.001f);
-        viewportImage.raycastTarget = true;
-        viewportObject.GetComponent<Mask>().showMaskGraphic = false;
+            typeof(RectMask2D));
+        viewportObject.transform.SetParent(terminal, false);
+        terminalViewport = viewportObject.GetComponent<RectTransform>();
+        terminalViewport.anchorMin = Vector2.zero;
+        terminalViewport.anchorMax = Vector2.one;
+        terminalViewport.offsetMin = new Vector2(20f, 52f);
+        terminalViewport.offsetMax = new Vector2(-20f, -12f);
 
         var contentObject = new GameObject(
-            "Content",
+            "Output",
             typeof(RectTransform),
             typeof(CanvasRenderer),
-            typeof(Text),
-            typeof(ContentSizeFitter));
-        contentObject.transform.SetParent(viewportObject.transform, false);
-        terminalContent = contentObject.GetComponent<RectTransform>();
-        terminalContent.anchorMin = new Vector2(0f, 1f);
-        terminalContent.anchorMax = new Vector2(1f, 1f);
-        terminalContent.pivot = new Vector2(0.5f, 1f);
-        terminalContent.anchoredPosition = Vector2.zero;
-        terminalContent.sizeDelta = Vector2.zero;
-
+            typeof(Text));
+        contentObject.transform.SetParent(terminalViewport, false);
         terminalText = contentObject.GetComponent<Text>();
         terminalText.font = BuiltinFont();
         terminalText.fontSize = 12;
@@ -576,12 +550,12 @@ public class AdminPanel : MonoBehaviour
         terminalText.lineSpacing = 1.4375f;
         terminalText.raycastTarget = false;
 
-        var contentFitter = contentObject.GetComponent<ContentSizeFitter>();
-        contentFitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
-        contentFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-
-        terminalScroll.viewport = viewportRect;
-        terminalScroll.content = terminalContent;
+        var textRect = terminalText.rectTransform;
+        textRect.anchorMin = new Vector2(0f, 1f);
+        textRect.anchorMax = new Vector2(1f, 1f);
+        textRect.pivot = new Vector2(0.5f, 1f);
+        textRect.anchoredPosition = Vector2.zero;
+        textRect.sizeDelta = Vector2.zero;
 
         var passwordObject = new GameObject("Password", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(InputField), typeof(Outline));
         passwordObject.transform.SetParent(terminal, false);
