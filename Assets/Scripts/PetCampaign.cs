@@ -358,7 +358,7 @@ public class PetCampaign : MonoBehaviour
         SaveFlags();
         PetDialogue.SayLines(
             "Oh, I see. I actually have that ability. Let me teach you how to unlock some of what I can do.",
-            "Type /adminpanel start on the phone panel to open the console, then enter the password to unlock.");
+            "Type \"/adminpanel start\" on the phone panel to open the console, then enter the password to unlock.");
     }
 
     public static void TryAgree()
@@ -387,7 +387,7 @@ public class PetCampaign : MonoBehaviour
 
         if (!PetPhone.Instance.IsOpen)
             PetPhone.Instance.SetOpen(true);
-        PetPhone.Instance.AddMessage("You can type /adminpanel start to open the control panel.");
+        PetPhone.Instance.AddMessage("You can type \"/adminpanel start\" to open the control panel.");
     }
 
     void AgreeCommand(string[] _)

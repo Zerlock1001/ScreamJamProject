@@ -2075,8 +2075,8 @@ public class PetJourney : MonoBehaviour
             added = true;
         }
 
-        if (saveFile && added)
-            SaveFoundPicture(sprite);
+        if (saveFile)
+            SaveFoundPicture(sprite, added);
     }
 
     void SaveCollectedMemes()
@@ -2117,6 +2117,28 @@ public class PetJourney : MonoBehaviour
                 collectedMemes.Add(sprite);
             }
         }
+
+        ExportCollectedFiles();
+    }
+
+    void ExportCollectedFiles()
+    {
+        GifClip morse = LoadMorseGif();
+        GifClip puzzle = LoadPuzzleGif();
+        for (int i = 0; i < collectedMemes.Count; i++)
+        {
+            Sprite sprite = collectedMemes[i];
+            if (sprite == null)
+                continue;
+            if ((morse != null && sprite == morse.First) || (puzzle != null && sprite == puzzle.First))
+                continue;
+            SaveFoundPicture(sprite, false);
+        }
+
+        if (collectedMemeKeys.Contains("__gif_morse__") && morse != null)
+            SaveFoundBytes(morse.SourceName, morse.SourceBytes);
+        if (collectedMemeKeys.Contains("__gif_puzzle__") && puzzle != null)
+            SaveFoundBytes(puzzle.SourceName, puzzle.SourceBytes);
     }
 
     Dictionary<string, Sprite> BuildSavedSpriteLookup()
@@ -2233,7 +2255,7 @@ public class PetJourney : MonoBehaviour
         }
     }
 
-    static void SaveFoundPicture(Sprite sprite)
+    static void SaveFoundPicture(Sprite sprite, bool allowDuplicate)
     {
         if (sprite == null || sprite.name == "PlaceholderMeme")
             return;
@@ -2253,15 +2275,16 @@ public class PetJourney : MonoBehaviour
                 return;
             }
 
-            if (sprite.texture == null || !sprite.texture.isReadable)
+            string name = string.IsNullOrEmpty(sprite.name) ? "picture.png" : SanitizeFileName(sprite.name) + ".png";
+            string destPng = Path.Combine(folder, name);
+            if (!allowDuplicate && File.Exists(destPng))
                 return;
 
-            byte[] png = sprite.texture.EncodeToPNG();
+            byte[] png = SpriteToPng(sprite);
             if (png == null || png.Length == 0)
                 return;
 
-            string name = string.IsNullOrEmpty(sprite.name) ? "picture.png" : SanitizeFileName(sprite.name) + ".png";
-            File.WriteAllBytes(UniqueFile(folder, name), png);
+            File.WriteAllBytes(allowDuplicate ? UniqueFile(folder, name) : destPng, png);
         }
         catch (Exception ex)
         {
@@ -2299,6 +2322,63 @@ public class PetJourney : MonoBehaviour
         string folder = Path.Combine(desktop, "Collections");
         Directory.CreateDirectory(folder);
         return folder;
+    }
+
+    static byte[] SpriteToPng(Sprite sprite)
+    {
+        Texture2D texture = sprite.texture;
+        if (texture == null)
+            return null;
+
+        int texW = texture.width;
+        int texH = texture.height;
+        if (texW <= 0 || texH <= 0)
+            return null;
+
+        Rect region = sprite.textureRect;
+        int x = Mathf.Clamp(Mathf.FloorToInt(region.x), 0, texW - 1);
+        int y = Mathf.Clamp(Mathf.FloorToInt(region.y), 0, texH - 1);
+        int width = Mathf.Clamp(Mathf.CeilToInt(region.xMax) - x, 1, texW - x);
+        int height = Mathf.Clamp(Mathf.CeilToInt(region.yMax) - y, 1, texH - y);
+
+        if (texture.isReadable)
+        {
+            if (x == 0 && y == 0 && width == texW && height == texH)
+                return texture.EncodeToPNG();
+
+            Color[] pixels = texture.GetPixels(x, y, width, height);
+            var cropped = new Texture2D(width, height, TextureFormat.RGBA32, false);
+            cropped.SetPixels(pixels);
+            cropped.Apply(false, false);
+            byte[] png = cropped.EncodeToPNG();
+            UnityEngine.Object.Destroy(cropped);
+            return png;
+        }
+
+        RenderTexture rt = RenderTexture.GetTemporary(
+            texW,
+            texH,
+            0,
+            RenderTextureFormat.ARGB32,
+            RenderTextureReadWrite.sRGB);
+        RenderTexture previous = RenderTexture.active;
+        Texture2D readable = null;
+        try
+        {
+            Graphics.Blit(texture, rt);
+            RenderTexture.active = rt;
+            readable = new Texture2D(width, height, TextureFormat.RGBA32, false);
+            readable.ReadPixels(new Rect(x, y, width, height), 0, 0);
+            readable.Apply(false, false);
+            return readable.EncodeToPNG();
+        }
+        finally
+        {
+            RenderTexture.active = previous;
+            RenderTexture.ReleaseTemporary(rt);
+            if (readable != null)
+                UnityEngine.Object.Destroy(readable);
+        }
     }
 
     static string SourceFile(Sprite sprite)
