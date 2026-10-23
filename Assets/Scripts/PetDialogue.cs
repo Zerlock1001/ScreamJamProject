@@ -88,7 +88,7 @@ public class PetDialogue : MonoBehaviour
     public static bool OpeningComplete { get; private set; }
     public bool IsOpen => visible;
     public Transform PetRoot => petRoot;
-    public bool CanDragPet => petRoot != null && !namePromptBusy && !PetJourney.PetIsAway
+    public bool CanDragPet => petRoot != null && OpeningComplete && !namePromptBusy && !PetJourney.PetIsAway
         && (PetJourney.Instance == null || !PetJourney.Instance.UsingFinalBody);
 
     public void FollowBody(Transform body)

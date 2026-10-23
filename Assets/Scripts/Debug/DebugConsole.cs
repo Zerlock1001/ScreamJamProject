@@ -115,7 +115,7 @@ namespace ScreamJam.Debugging
             RegisterCommand("tempclear", "/tempclear", "Delete cached photos, screenshots, and recordings.", _ => ClearCachedFiles());
             RegisterCommand("ip", "/ip", "Show the player's approximate city.", _ => BeginIpLookup());
             RegisterCommand("sayip", "/sayip", "Ask whether the player lives in their IP city.", _ => BeginSayIp());
-            RegisterCommand("sweeper", "/sweeper", "Open the daily minesweeper mini game.", _ => DailyMiniGame.Trigger());
+            RegisterCommand("sweeper", "/sweeper [passcode]", "Open the daily minesweeper mini game, or print its admin passcode.", HandleSweeper);
             RegisterCommand("supercooleffect", "/supercooleffect", "Freeze the screen with a glitch grid effect.", _ => SuperCoolEffect.Trigger());
             RegisterCommand("quit", "/quit", "Quit the game.", _ => QuitGame());
             _open = false;
@@ -1200,6 +1200,37 @@ namespace ScreamJam.Debugging
             });
 
             _scrollToBottom = true;
+        }
+
+        private void HandleSweeper(string[] args)
+        {
+            if (args == null || args.Length == 0)
+            {
+                DailyMiniGame.Trigger();
+                return;
+            }
+
+            if (args.Length == 1 &&
+                string.Equals(args[0], "passcode", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!DailyMiniGame.HasGame)
+                {
+                    AddCommandLine("No active minesweeper board. Run /sweeper first.", LogType.Warning);
+                    return;
+                }
+
+                string passcode = AdminPanel.CurrentPassword();
+                if (string.IsNullOrEmpty(passcode))
+                {
+                    AddCommandLine("Minesweeper passcode is not available.", LogType.Warning);
+                    return;
+                }
+
+                AddCommandLine("Minesweeper passcode: " + passcode);
+                return;
+            }
+
+            AddCommandLine("Usage: /sweeper [passcode]", LogType.Warning);
         }
 
         private void HandleScreenshot(string[] args)

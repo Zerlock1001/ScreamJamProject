@@ -55,6 +55,7 @@ public class AdminPanel : MonoBehaviour
     bool verifying;
     bool accessGranted;
     int[] colorSequence;
+    static int[] sharedColorSequence;
 
     static Sprite avatarSprite;
 
@@ -226,8 +227,13 @@ public class AdminPanel : MonoBehaviour
 
         if (accessGranted)
             colorSequence = null;
-        else
-            GenerateColorSequence();
+        else if (colorSequence == null)
+        {
+            if (sharedColorSequence != null && sharedColorSequence.Length > 0)
+                colorSequence = sharedColorSequence;
+            else
+                GenerateColorSequence();
+        }
         if (outputRoutine != null)
             StopCoroutine(outputRoutine);
         outputRoutine = StartCoroutine(StreamTerminal());
@@ -276,31 +282,60 @@ public class AdminPanel : MonoBehaviour
         float height = terminalText.preferredHeight;
         textRect.sizeDelta = new Vector2(0f, height);
         float overflow = Mathf.Max(0f, height - terminalViewport.rect.height);
-        textRect.anchoredPosition = new Vector2(0f, -overflow);
+        textRect.anchoredPosition = new Vector2(0f, overflow);
+    }
+
+    public static string CurrentPassword()
+    {
+        int[] sequence = instance != null ? instance.colorSequence : null;
+        if (sequence == null || sequence.Length == 0)
+            sequence = sharedColorSequence;
+
+        if (sequence == null || sequence.Length == 0)
+        {
+            sequence = CreateColorSequence();
+            sharedColorSequence = sequence;
+            if (instance != null)
+                instance.colorSequence = sequence;
+        }
+        else
+        {
+            sharedColorSequence = sequence;
+        }
+
+        return DailyMiniGame.PasswordFor(sequence);
     }
 
     void GenerateColorSequence()
     {
+        colorSequence = CreateColorSequence();
+        sharedColorSequence = colorSequence;
+    }
+
+    static int[] CreateColorSequence()
+    {
         // Classic minesweeper number colors: 1 blue, 2 green, 3 red.
         // Seed all three colors first, then fill and shuffle so every color
         // appears at least once in the six-square hint.
-        colorSequence = new int[6];
-        colorSequence[0] = 1;
-        colorSequence[1] = 2;
-        colorSequence[2] = 3;
-        for (int i = 3; i < colorSequence.Length; i++)
+        int[] sequence = new int[6];
+        sequence[0] = 1;
+        sequence[1] = 2;
+        sequence[2] = 3;
+        for (int i = 3; i < sequence.Length; i++)
         {
             int color = UnityEngine.Random.Range(0, 3);
-            colorSequence[i] = color == 0 ? 3 : (color == 1 ? 2 : 1);
+            sequence[i] = color == 0 ? 3 : (color == 1 ? 2 : 1);
         }
 
-        for (int i = colorSequence.Length - 1; i > 0; i--)
+        for (int i = sequence.Length - 1; i > 0; i--)
         {
             int swap = UnityEngine.Random.Range(0, i + 1);
-            int value = colorSequence[i];
-            colorSequence[i] = colorSequence[swap];
-            colorSequence[swap] = value;
+            int value = sequence[i];
+            sequence[i] = sequence[swap];
+            sequence[swap] = value;
         }
+
+        return sequence;
     }
 
     string ColorHintMarkup()
@@ -384,6 +419,12 @@ public class AdminPanel : MonoBehaviour
 
         const float duration = 3f;
         float elapsed = 0f;
+        if (terminalText != null)
+        {
+            terminalText.text = prefix + "VERIFYING.";
+            StartCoroutine(ScrollTerminalToBottom());
+        }
+
         while (elapsed < duration)
         {
             elapsed += Time.unscaledDeltaTime;

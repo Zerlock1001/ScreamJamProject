@@ -49,11 +49,11 @@ public class DesktopPetWindow : MonoBehaviour
     const int SwHide = 0;
     const int SwShowNoActivate = 4;
 
-    const int WmNcLButtonDown = 0x00A1;
+
     const uint WmNcHitTest = 0x0084;
     const uint WmWindowPosChanging = 0x0046;
     const int HtTransparent = -1;
-    const int HtCaption = 0x2;
+
     const uint MonitorDefaultToPrimary = 1;
     const uint MonitorDefaultToNearest = 2;
 
@@ -172,12 +172,6 @@ public class DesktopPetWindow : MonoBehaviour
         if (!ready || hwnd == IntPtr.Zero)
             return;
 
-        if (Input.GetKeyDown(KeyCode.Escape))
-        {
-            QuitRefusal.Play();
-            return;
-        }
-
         if (Screen.fullScreenMode != FullScreenMode.Windowed)
             Screen.fullScreenMode = FullScreenMode.Windowed;
 
@@ -206,8 +200,7 @@ public class DesktopPetWindow : MonoBehaviour
             if ((Input.mousePosition - (Vector3)dragOrigin).sqrMagnitude >= threshold * threshold)
             {
                 armDrag = false;
-                if (!TryBeginPetDrag())
-                    BeginWindowDrag();
+                TryBeginPetDrag();
             }
         }
         else if (petDragActive && Input.GetMouseButton(0))
@@ -246,14 +239,6 @@ public class DesktopPetWindow : MonoBehaviour
         regionDirty = true;
         ApplyHitRegion();
         return true;
-    }
-
-    void BeginWindowDrag()
-    {
-        dragging = true;
-        ReleaseCapture();
-        SendMessage(hwnd, WmNcLButtonDown, HtCaption, 0);
-        dragging = false;
     }
 
     void UpdatePetDrag()
@@ -1359,12 +1344,6 @@ public class DesktopPetWindow : MonoBehaviour
 
     [DllImport("gdi32.dll")]
     static extern bool DeleteObject(IntPtr hObject);
-
-    [DllImport("user32.dll")]
-    static extern bool ReleaseCapture();
-
-    [DllImport("user32.dll")]
-    static extern IntPtr SendMessage(IntPtr hWnd, int msg, int wParam, int lParam);
 
     [DllImport("dwmapi.dll")]
     static extern uint DwmExtendFrameIntoClientArea(IntPtr hWnd, ref Margins margins);

@@ -47,7 +47,7 @@ public class DailyMiniGame : MonoBehaviour
     const int MineCount = 5;
     const int MaxClue = 3;
     const int CanvasOrder = 20000;
-    const float RetrySeconds = 3f;
+    const float RetrySeconds = 1.5f;
     const float PopupSlideSeconds = 0.34f;
     const float PopupShrinkSeconds = 0.18f;
     const float WindowOpenSeconds = 0.24f;

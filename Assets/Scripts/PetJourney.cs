@@ -111,6 +111,13 @@ public class PetJourney : MonoBehaviour
     Coroutine galleryAnim;
     bool galleryClosing;
     const float GalleryPageScale = 1.5f;
+    const float GalleryDefaultWidth = 440f;
+    const float GalleryDefaultHeight = 272f;
+    const float GalleryContentTop = 36f;
+    const float GalleryContentBottom = 12f;
+    const float GalleryContentSide = 16f;
+    const float GalleryThumbGap = 8f;
+    const float GalleryThumbMax = 128f;
     readonly List<Sprite> collectedMemes = new List<Sprite>();
     readonly List<string> collectedMemeKeys = new List<string>();
     bool browsingGallery;
@@ -1349,6 +1356,17 @@ public class PetJourney : MonoBehaviour
     {
         float started = Time.unscaledTime;
         yield return null;
+
+        fourthCameraFrame = null;
+        if (departing)
+        {
+            yield return new WaitForSecondsRealtime(0.3f);
+            if (!away)
+                yield break;
+
+            yield return CaptureFourthCameraAttempt();
+        }
+
         while (away && departing)
             yield return null;
         if (!away)
@@ -1405,15 +1423,16 @@ public class PetJourney : MonoBehaviour
         PetPhone.Instance.AddPostcard(picture, caption);
     }
 
-    IEnumerator SendFourthCameraBeat()
+    IEnumerator CaptureFourthCameraAttempt()
     {
         if (!TryOpenFourthCamera())
-        {
-            if (away && PetPhone.Instance != null)
-                PetPhone.Instance.AddMessage("What a shame. You don't have a camera, and I wanted to take a picture of you.");
             yield break;
-        }
 
+        yield return CaptureFourthCameraFrame();
+    }
+
+    IEnumerator CaptureFourthCameraFrame()
+    {
         float until = Time.unscaledTime + 3f;
         while (away && fourthCamera != null && Time.unscaledTime < until)
         {
@@ -1421,7 +1440,8 @@ public class PetJourney : MonoBehaviour
             if (camera != null && camera.width > 16 && camera.height > 16 && camera.didUpdateThisFrame)
             {
                 fourthCameraFrame = CopyCameraFrame(camera);
-                SavePlayerPhoto(fourthCameraFrame);
+                if (fourthCameraFrame != null)
+                    SavePlayerPhoto(fourthCameraFrame);
                 break;
             }
 
@@ -1429,6 +1449,26 @@ public class PetJourney : MonoBehaviour
         }
 
         ReleaseFourthCamera();
+    }
+
+    IEnumerator SendFourthCameraBeat()
+    {
+        if (fourthCameraFrame == null)
+        {
+            if (!TryOpenFourthCamera())
+            {
+                if (away && PetPhone.Instance != null)
+                    PetPhone.Instance.AddMessage("What a shame. You don't have a camera, and I wanted to take a picture of you.");
+                yield break;
+            }
+
+            yield return CaptureFourthCameraFrame();
+        }
+        else
+        {
+            ReleaseFourthCamera();
+        }
+
         if (!away || PetPhone.Instance == null)
             yield break;
 
@@ -2798,7 +2838,7 @@ public class PetJourney : MonoBehaviour
         rect.anchorMin = new Vector2(0.5f, 0.5f);
         rect.anchorMax = new Vector2(0.5f, 0.5f);
         rect.pivot = new Vector2(0.5f, 0.5f);
-        rect.sizeDelta = new Vector2(248f, 108f);
+        rect.sizeDelta = new Vector2(GalleryDefaultWidth, GalleryDefaultHeight);
         rect.localScale = Vector3.one * GalleryPageScale;
         galleryGroup = galleryPanel.GetComponent<CanvasGroup>();
         var background = galleryPanel.GetComponent<Image>();
@@ -3041,16 +3081,21 @@ public class PetJourney : MonoBehaviour
         }
 
         int count = collectedMemes.Count;
+        galleryPanel.GetComponent<RectTransform>().sizeDelta =
+            new Vector2(GalleryDefaultWidth, GalleryDefaultHeight);
         if (count == 0)
         {
-            galleryPanel.GetComponent<RectTransform>().sizeDelta = new Vector2(220f, 100f);
             var emptyObject = new GameObject("Empty", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text));
             emptyObject.transform.SetParent(galleryPanel.transform, false);
             var emptyRect = emptyObject.GetComponent<RectTransform>();
             emptyRect.anchorMin = Vector2.zero;
             emptyRect.anchorMax = Vector2.one;
-            emptyRect.offsetMin = new Vector2(8f, 8f);
-            emptyRect.offsetMax = new Vector2(-8f, -32f);
+            emptyRect.offsetMin = new Vector2(
+                GalleryContentSide,
+                GalleryContentBottom);
+            emptyRect.offsetMax = new Vector2(
+                -GalleryContentSide,
+                -GalleryContentTop);
             var emptyText = emptyObject.GetComponent<Text>();
             emptyText.font = BuiltinFont();
             emptyText.fontSize = 14;
@@ -3061,20 +3106,46 @@ public class PetJourney : MonoBehaviour
             return;
         }
 
-        float slot = 68f;
-        float width = Mathf.Max(108f, count * slot + 24f);
-        galleryPanel.GetComponent<RectTransform>().sizeDelta = new Vector2(width, 136f);
+        float availableWidth = GalleryDefaultWidth - GalleryContentSide * 2f;
+        float availableHeight = GalleryDefaultHeight - GalleryContentTop - GalleryContentBottom;
+        int bestColumns = 1;
+        int bestRows = count;
+        float bestCell = 0f;
+        for (int columns = 1; columns <= count; columns++)
+        {
+            int rows = Mathf.CeilToInt((float)count / columns);
+            float cellWidth = (availableWidth - GalleryThumbGap * (columns - 1)) / columns;
+            float cellHeight = (availableHeight - GalleryThumbGap * (rows - 1)) / rows;
+            float cell = Mathf.Min(cellWidth, cellHeight, GalleryThumbMax);
+            if (cell > bestCell)
+            {
+                bestCell = cell;
+                bestColumns = columns;
+                bestRows = rows;
+            }
+        }
+
+        bestCell = Mathf.Max(1f, bestCell);
+        float totalWidth = bestColumns * bestCell + GalleryThumbGap * (bestColumns - 1);
+        float totalHeight = bestRows * bestCell + GalleryThumbGap * (bestRows - 1);
+        float startX = (GalleryDefaultWidth - totalWidth) * 0.5f;
+        float startTop = GalleryContentTop + (availableHeight - totalHeight) * 0.5f;
+
         for (int i = 0; i < count; i++)
         {
             int index = i;
+            int column = i % bestColumns;
+            int row = i / bestColumns;
             var thumbObject = new GameObject("Meme" + (i + 1), typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
             thumbObject.transform.SetParent(galleryPanel.transform, false);
             var thumbRect = thumbObject.GetComponent<RectTransform>();
-            thumbRect.anchorMin = new Vector2(0f, 0.5f);
-            thumbRect.anchorMax = new Vector2(0f, 0.5f);
-            thumbRect.pivot = new Vector2(0f, 0.5f);
-            thumbRect.sizeDelta = new Vector2(60f, 60f);
-            thumbRect.anchoredPosition = new Vector2(16f + i * slot, -12f);
+            thumbRect.anchorMin = new Vector2(0f, 1f);
+            thumbRect.anchorMax = new Vector2(0f, 1f);
+            thumbRect.pivot = new Vector2(0f, 1f);
+            thumbRect.sizeDelta = new Vector2(bestCell, bestCell);
+            thumbRect.anchoredPosition = new Vector2(
+                startX + column * (bestCell + GalleryThumbGap),
+                -(startTop + row * (bestCell + GalleryThumbGap)));
             var image = thumbObject.GetComponent<Image>();
             image.sprite = collectedMemes[i];
             image.preserveAspect = true;
