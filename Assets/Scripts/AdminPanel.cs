@@ -22,6 +22,14 @@ public class AdminPanel : MonoBehaviour
     static readonly Color TextColor = new Color(0.88f, 0.88f, 0.90f, 1f);
     static readonly Color Muted = new Color(0.48f, 0.48f, 0.50f, 1f);
     static readonly Color StatusColor = new Color(0.78f, 0.78f, 0.80f, 1f);
+    static readonly string[] TerminalLines =
+    {
+        "admin@panel:~# access --admin",
+        "<color=#2f8f57>[SUCCESS]</color> SECURE CHANNEL ESTABLISHED",
+        "<color=#a33d3d>[WARN]</color> COULD NOT VERIFY IDENTITY",
+        "<color=#a33d3d>[WARN]</color> SESSION TRUST IS LIMITED",
+        "<color=#e6e6e8>//ENTER ADMIN PASSWORD:</color>"
+    };
 
     static AdminPanel instance;
     GameObject root;
@@ -32,6 +40,8 @@ public class AdminPanel : MonoBehaviour
     Text usernameText;
     Text roleText;
     Text statusText;
+    Text terminalText;
+    Coroutine outputRoutine;
 
     static Sprite avatarSprite;
 
@@ -94,7 +104,10 @@ public class AdminPanel : MonoBehaviour
         root.SetActive(true);
         root.transform.SetAsLastSibling();
         if (!wasActive)
+        {
             animRoutine = StartCoroutine(AnimateOpen());
+            StartTerminalOutput();
+        }
         StartCoroutine(FocusPassword());
     }
 
@@ -107,6 +120,12 @@ public class AdminPanel : MonoBehaviour
         {
             StopCoroutine(animRoutine);
             animRoutine = null;
+        }
+
+        if (outputRoutine != null)
+        {
+            StopCoroutine(outputRoutine);
+            outputRoutine = null;
         }
 
         if (canvasGroup != null)
@@ -172,6 +191,35 @@ public class AdminPanel : MonoBehaviour
 
         root.SetActive(false);
         animRoutine = null;
+    }
+
+    void StartTerminalOutput()
+    {
+        if (terminalText == null)
+            return;
+
+        if (outputRoutine != null)
+            StopCoroutine(outputRoutine);
+        outputRoutine = StartCoroutine(StreamTerminal());
+    }
+
+    IEnumerator StreamTerminal()
+    {
+        if (terminalText == null)
+            yield break;
+
+        terminalText.text = string.Empty;
+        for (int i = 0; i < TerminalLines.Length; i++)
+        {
+            if (i > 0)
+                yield return new WaitForSecondsRealtime(Random.Range(0.3f, 0.9f));
+
+            if (i > 0)
+                terminalText.text += "\n";
+            terminalText.text += TerminalLines[i];
+        }
+
+        outputRoutine = null;
     }
 
     IEnumerator FocusPassword()
@@ -296,8 +344,9 @@ public class AdminPanel : MonoBehaviour
         roleRect.sizeDelta = new Vector2(300f, 20f);
         roleText.raycastTarget = false;
 
-        statusText = MakeText("Status", root.transform, "● SESSION ACTIVE", 11, TextAnchor.MiddleRight, StatusColor);
+        statusText = MakeText("Status", root.transform, "<color=#3fbf72>●</color> SESSION ACTIVE", 11, TextAnchor.MiddleRight, StatusColor);
         statusText.fontStyle = FontStyle.Bold;
+        statusText.supportRichText = true;
         var statusRect = statusText.rectTransform;
         statusRect.anchorMin = new Vector2(1f, 1f);
         statusRect.anchorMax = new Vector2(1f, 1f);
@@ -305,6 +354,15 @@ public class AdminPanel : MonoBehaviour
         statusRect.anchoredPosition = new Vector2(-20f, -62f);
         statusRect.sizeDelta = new Vector2(220f, 20f);
         statusText.raycastTarget = false;
+
+        var ipText = MakeText("IP", root.transform, "IP: " + LocalIp(), 11, TextAnchor.MiddleRight, Muted);
+        var ipRect = ipText.rectTransform;
+        ipRect.anchorMin = new Vector2(1f, 1f);
+        ipRect.anchorMax = new Vector2(1f, 1f);
+        ipRect.pivot = new Vector2(1f, 1f);
+        ipRect.anchoredPosition = new Vector2(-20f, -84f);
+        ipRect.sizeDelta = new Vector2(220f, 18f);
+        ipText.raycastTarget = false;
 
         var separator = MakePanel("Separator", root.transform, new Color(0.70f, 0.70f, 0.72f, 0.28f));
         var separatorRect = separator;
@@ -324,17 +382,10 @@ public class AdminPanel : MonoBehaviour
         terminalOutline.effectColor = new Color(0.72f, 0.72f, 0.74f, 0.26f);
         terminalOutline.effectDistance = new Vector2(1f, -1f);
 
-        var terminalText = MakeText(
+        terminalText = MakeText(
             "Output",
             terminal,
-            "admin@panel:~# access --admin\n" +
-            "<color=#e0e0e2>[ OK ]</color> SECURE CHANNEL ESTABLISHED\n" +
-            "<color=#c0c0c4>[FAIL]</color> CREDENTIAL VERIFICATION FAILED\n" +
-            "<color=#c0c0c4>[FAIL]</color> IDENTITY COULD NOT BE VERIFIED\n" +
-            "<color=#9a9a9e>[WARN]</color> TRUST CHAIN UNAVAILABLE\n" +
-            "<color=#9a9a9e>[WARN]</color> ACCESS TOKEN NOT VERIFIED\n" +
-            "IP: " + LocalIp() + "\n" +
-            "<color=#ffffff>//ENTER ADMIN PASSWORD:</color>",
+            string.Empty,
             12,
             TextAnchor.UpperLeft,
             TextColor);
