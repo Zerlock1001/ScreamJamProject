@@ -3,7 +3,6 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using UnityEngine;
-using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 /// <summary>
@@ -105,6 +104,9 @@ public class DesktopPetWindow : MonoBehaviour
     IntPtr hwnd;
     bool armDrag;
     Vector2 dragOrigin;
+    bool petDragActive;
+    Transform petDragTarget;
+    Vector3 petDragLastWorld;
     bool ready;
     Vector3 camPosition;
     Quaternion camRotation;
@@ -190,7 +192,8 @@ public class DesktopPetWindow : MonoBehaviour
         UpdateClickThrough();
         ApplyHitRegion();
 
-        bool overVisible = IsCursorOverVisiblePixel() && !IsPointerOverUi();
+        bool overMenu = TryGetCursorScreenPoint(out Vector2 cursorScreen) && CapsuleMenu.Blocks(cursorScreen);
+        bool overVisible = IsCursorOverVisiblePixel() && !IsCursorOverInterface() && !overMenu;
         if (Input.GetMouseButtonDown(0) && overVisible)
         {
             armDrag = true;
@@ -203,17 +206,114 @@ public class DesktopPetWindow : MonoBehaviour
             if ((Input.mousePosition - (Vector3)dragOrigin).sqrMagnitude >= threshold * threshold)
             {
                 armDrag = false;
-                dragging = true;
-                ReleaseCapture();
-                SendMessage(hwnd, WmNcLButtonDown, HtCaption, 0);
-                dragging = false;
+                if (!TryBeginPetDrag())
+                    BeginWindowDrag();
             }
+        }
+        else if (petDragActive && Input.GetMouseButton(0))
+        {
+            UpdatePetDrag();
         }
 
         if (Input.GetMouseButtonUp(0))
             armDrag = false;
+
+        if (petDragActive && !Input.GetMouseButton(0))
+            EndPetDrag();
 #endif
     }
+
+#if !UNITY_EDITOR
+    // The adaptive window covers almost the whole work area, so moving the native
+    // window is clamped. Drag the pet inside the transparent overlay instead.
+    // Returns true when the drag was handled (even if blocked by a modal prompt).
+    bool TryBeginPetDrag()
+    {
+        PetDialogue pet = PetDialogue.Instance;
+        if (pet == null)
+            return false;
+
+        if (!pet.CanDragPet || cam == null)
+            return true;
+
+        petDragTarget = pet.PetRoot;
+        if (petDragTarget == null)
+            return true;
+
+        petDragActive = true;
+        dragging = true;
+        petDragLastWorld = ScreenToWorldOnPetPlane(Input.mousePosition);
+        regionDirty = true;
+        ApplyHitRegion();
+        return true;
+    }
+
+    void BeginWindowDrag()
+    {
+        dragging = true;
+        ReleaseCapture();
+        SendMessage(hwnd, WmNcLButtonDown, HtCaption, 0);
+        dragging = false;
+    }
+
+    void UpdatePetDrag()
+    {
+        if (petDragTarget == null)
+        {
+            EndPetDrag();
+            return;
+        }
+
+        Vector3 world = ScreenToWorldOnPetPlane(Input.mousePosition);
+        Vector3 delta = world - petDragLastWorld;
+        if (delta.sqrMagnitude > 0f)
+        {
+            petDragTarget.position += new Vector3(delta.x, delta.y, 0f);
+            ClampPetToView();
+        }
+
+        petDragLastWorld = world;
+    }
+
+    void EndPetDrag()
+    {
+        petDragActive = false;
+        petDragTarget = null;
+        dragging = false;
+        regionDirty = true;
+    }
+
+    Vector3 ScreenToWorldOnPetPlane(Vector2 screenPoint)
+    {
+        if (cam == null)
+            return Vector3.zero;
+
+        float depth = 10f;
+        if (petDragTarget != null)
+        {
+            Vector3 projected = cam.WorldToScreenPoint(petDragTarget.position);
+            if (projected.z > 0.01f)
+                depth = projected.z;
+        }
+
+        return cam.ScreenToWorldPoint(new Vector3(screenPoint.x, screenPoint.y, depth));
+    }
+
+    void ClampPetToView()
+    {
+        if (cam == null || petDragTarget == null || !cam.orthographic)
+            return;
+
+        Vector3 position = petDragTarget.position;
+        float halfHeight = Mathf.Max(0.01f, cam.orthographicSize);
+        float halfWidth = halfHeight * Mathf.Max(0.01f, cam.aspect);
+        Vector3 center = cam.transform.position;
+        const float margin = 1.2f;
+        position.x = Mathf.Clamp(position.x, center.x - halfWidth + margin, center.x + halfWidth - margin);
+        position.y = Mathf.Clamp(position.y, center.y - halfHeight + margin, center.y + halfHeight - margin);
+        petDragTarget.position = position;
+    }
+#endif
 
     void OnDestroy()
     {
@@ -518,7 +618,7 @@ public class DesktopPetWindow : MonoBehaviour
         if (hwnd == IntPtr.Zero)
             return;
 
-        bool solid = IsCursorOverVisiblePixel();
+        bool solid = dragging || IsCursorOverVisiblePixel();
         bool changed = false;
         for (int i = 0; i < regionTargets.Count; i++)
             changed |= SetPassThrough(regionTargets[i], !solid);
@@ -715,6 +815,32 @@ public class DesktopPetWindow : MonoBehaviour
         if (!GetCursorPos(out NativePoint cursor))
             return false;
         return IsScreenPixelVisible(cursor.x, cursor.y);
+    }
+
+    bool IsCursorOverInterface()
+    {
+        if (!TryGetCursorScreenPoint(out Vector2 point))
+            return false;
+        return ContainsPoint(interfaceSnapshot, point);
+    }
+
+    bool TryGetCursorScreenPoint(out Vector2 screenPoint)
+    {
+        screenPoint = default;
+        if (hwnd == IntPtr.Zero || !GetCursorPos(out NativePoint cursor))
+            return false;
+        if (!ScreenToClient(hwnd, ref cursor) || !GetClientRect(hwnd, out NativeRect client))
+            return false;
+
+        int clientWidth = Mathf.Max(1, client.right - client.left);
+        int clientHeight = Mathf.Max(1, client.bottom - client.top);
+        if (cursor.x < 0 || cursor.y < 0 || cursor.x >= clientWidth || cursor.y >= clientHeight)
+            return false;
+
+        screenPoint = new Vector2(
+            (cursor.x + 0.5f) * bufferWidth / clientWidth,
+            (clientHeight - cursor.y - 0.5f) * bufferHeight / clientHeight);
+        return true;
     }
 
     bool IsScreenPixelVisible(int screenX, int screenY)
@@ -966,7 +1092,7 @@ public class DesktopPetWindow : MonoBehaviour
         if (!regionDirty && hash == appliedRegionHash)
             return;
 
-        bool keepFullWindow = sampleSnapshot.Length > 0 && !spritesFullyMapped;
+        bool keepFullWindow = dragging || (sampleSnapshot.Length > 0 && !spritesFullyMapped);
         var targets = regionTargets.Count > 0 ? regionTargets : new List<IntPtr> { hwnd };
         for (int i = 0; i < targets.Count; i++)
         {
@@ -1112,11 +1238,6 @@ public class DesktopPetWindow : MonoBehaviour
         if (found == IntPtr.Zero)
             found = System.Diagnostics.Process.GetCurrentProcess().MainWindowHandle;
         return found;
-    }
-
-    static bool IsPointerOverUi()
-    {
-        return EventSystem.current != null && EventSystem.current.IsPointerOverGameObject();
     }
 
     [StructLayout(LayoutKind.Sequential)]

@@ -42,6 +42,8 @@ public class PetJourney : MonoBehaviour
 
     public static bool SavesProgress => Instance != null && Instance.keepProgressBetweenLaunches;
     public int CompletedTrips => tripCount;
+    public bool JourneyAvailable { get; private set; }
+    public float MoodNormalized => CurrentMood();
 
     Vector3 homeScale = Vector3.one;
     GameObject memePopup;
@@ -155,6 +157,7 @@ public class PetJourney : MonoBehaviour
     void Update()
     {
         RefreshMoodBar();
+        PlaceMoodWidget();
         if (waitingForDialogue && PetDialogue.Instance != null && !PetDialogue.Instance.IsOpen && !PetCampaign.BlocksJourney)
         {
             waitingForDialogue = false;
@@ -215,6 +218,13 @@ public class PetJourney : MonoBehaviour
     static long SecondsToTicks(float seconds)
     {
         return (long)(Math.Max(0d, seconds) * TimeSpan.TicksPerSecond);
+    }
+
+    public void StartJourney()
+    {
+        if (!JourneyAvailable)
+            return;
+        BeginJourney();
     }
 
     void BeginJourney()
@@ -767,14 +777,83 @@ public class PetJourney : MonoBehaviour
                 moodFill = fillObject.GetComponent<Image>();
         }
 
-        if (moodFill == null)
+        if (moodFill != null)
+        {
+            moodFill.type = Image.Type.Filled;
+            moodFill.fillMethod = Image.FillMethod.Horizontal;
+            moodFill.fillOrigin = (int)Image.OriginHorizontal.Left;
+            moodFill.raycastTarget = false;
+        }
+
+        if (moodWidget == null)
+            moodWidget = FindMoodWidget();
+        if (moodWidget == null)
+        {
+            var moodObject = GameObject.Find("Mood");
+            if (moodObject != null)
+                moodWidget = moodObject.transform as RectTransform;
+        }
+
+        if (moodWidget == null)
             return;
 
-        moodFill.type = Image.Type.Filled;
-        moodFill.fillMethod = Image.FillMethod.Horizontal;
-        moodFill.fillOrigin = (int)Image.OriginHorizontal.Left;
-        moodFill.raycastTarget = false;
+        moodWidget.anchorMin = new Vector2(0.5f, 0.5f);
+        moodWidget.anchorMax = new Vector2(0.5f, 0.5f);
+        moodWidget.pivot = new Vector2(0.5f, 1f);
+        moodWidget.gameObject.SetActive(true);
         RefreshMoodBar();
+        PlaceMoodWidget();
+    }
+
+    void PlaceMoodWidget()
+    {
+        if (moodWidget == null)
+            moodWidget = FindMoodWidget();
+        if (moodWidget == null)
+        {
+            var moodObject = GameObject.Find("Mood");
+            if (moodObject != null)
+                moodWidget = moodObject.transform as RectTransform;
+        }
+        if (moodWidget == null)
+            return;
+
+        bool visible = pet != null && pet.enabled && pet.gameObject.activeInHierarchy;
+        if (!visible)
+        {
+            if (moodWidget.gameObject.activeSelf)
+                moodWidget.gameObject.SetActive(false);
+            return;
+        }
+
+        if (!moodWidget.gameObject.activeSelf)
+            moodWidget.gameObject.SetActive(true);
+
+        Camera cam = Camera.main;
+        Canvas canvas = moodWidget.GetComponentInParent<Canvas>();
+        RectTransform canvasRect = canvas != null ? canvas.transform as RectTransform : null;
+        if (cam == null || canvasRect == null)
+            return;
+
+        Bounds bounds = pet.bounds;
+        Vector3 world = new Vector3(bounds.center.x, bounds.min.y - 0.15f, bounds.center.z);
+        Vector3 screen = cam.WorldToScreenPoint(world);
+        if (screen.z < 0f)
+            return;
+
+        Camera uiCamera = canvas.renderMode == RenderMode.ScreenSpaceOverlay
+            ? null
+            : (canvas.worldCamera != null ? canvas.worldCamera : cam);
+        if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                canvasRect, screen, uiCamera, out Vector2 local))
+            return;
+
+        Rect rect = canvasRect.rect;
+        float halfWidth = moodWidget.rect.width * 0.5f;
+        float height = moodWidget.rect.height;
+        local.x = Mathf.Clamp(local.x, rect.xMin + halfWidth, rect.xMax - halfWidth);
+        local.y = Mathf.Clamp(local.y, rect.yMin + height + 6f, rect.yMax - 6f);
+        moodWidget.anchoredPosition = local - rect.center;
     }
 
     void ShakeMood()
@@ -1040,16 +1119,58 @@ public class PetJourney : MonoBehaviour
         titleRect.anchorMin = Vector2.zero;
         titleRect.anchorMax = Vector2.one;
         titleRect.offsetMin = new Vector2(10f, 0f);
-        titleRect.offsetMax = new Vector2(-10f, 0f);
+        titleRect.offsetMax = new Vector2(-34f, 0f);
         var titleText = title.GetComponent<Text>();
         titleText.font = BuiltinFont();
         titleText.fontSize = 14;
+        titleText.fontStyle = FontStyle.Bold;
         titleText.alignment = TextAnchor.MiddleLeft;
         titleText.color = new Color(0.24f, 0.16f, 0.12f, 1f);
         titleText.raycastTarget = false;
         titleText.text = "Collections";
 
+        var closeObject = new GameObject("Close", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
+        closeObject.transform.SetParent(handleObject.transform, false);
+        var closeRect = closeObject.GetComponent<RectTransform>();
+        closeRect.anchorMin = new Vector2(1f, 1f);
+        closeRect.anchorMax = new Vector2(1f, 1f);
+        closeRect.pivot = new Vector2(1f, 1f);
+        closeRect.anchoredPosition = new Vector2(-5f, -3f);
+        closeRect.sizeDelta = new Vector2(22f, 22f);
+        var closeImage = closeObject.GetComponent<Image>();
+        closeImage.sprite = background.sprite;
+        closeImage.type = background.type;
+        closeImage.color = new Color(0.78f, 0.28f, 0.22f, 1f);
+        closeImage.raycastTarget = true;
+        var closeButton = closeObject.GetComponent<Button>();
+        closeButton.targetGraphic = closeImage;
+        closeButton.onClick.AddListener(CloseGallery);
+        var closeLabelObject = new GameObject("Label", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text));
+        closeLabelObject.transform.SetParent(closeObject.transform, false);
+        var closeLabelRect = closeLabelObject.GetComponent<RectTransform>();
+        closeLabelRect.anchorMin = Vector2.zero;
+        closeLabelRect.anchorMax = Vector2.one;
+        closeLabelRect.offsetMin = Vector2.zero;
+        closeLabelRect.offsetMax = Vector2.zero;
+        var closeLabel = closeLabelObject.GetComponent<Text>();
+        closeLabel.font = BuiltinFont();
+        closeLabel.fontSize = 13;
+        closeLabel.fontStyle = FontStyle.Bold;
+        closeLabel.alignment = TextAnchor.MiddleCenter;
+        closeLabel.color = Color.white;
+        closeLabel.raycastTarget = false;
+        closeLabel.text = "X";
+
         galleryPanel.SetActive(false);
+    }
+
+    void CloseGallery()
+    {
+        if (galleryPanel != null)
+            galleryPanel.SetActive(false);
+        browsingGallery = false;
+        if (memePopup != null)
+            memePopup.SetActive(false);
     }
 
     public void OpenGallery()
@@ -1181,8 +1302,9 @@ public class PetJourney : MonoBehaviour
 
     void SetJourneyButtonVisible(bool visible)
     {
+        JourneyAvailable = visible;
         if (journeyButton != null)
-            journeyButton.gameObject.SetActive(visible);
+            journeyButton.gameObject.SetActive(false);
     }
 
     int LoadInt(string key, int fallback = 0)

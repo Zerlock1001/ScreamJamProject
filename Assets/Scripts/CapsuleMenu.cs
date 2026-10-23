@@ -2,26 +2,27 @@ using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using UnityEngine;
+using UnityEngine.UI;
 
 /// <summary>
-/// Left-click the capsule to open a small pixel menu on its left.
-/// Only the quit option is implemented; the other options are placeholders.
+/// Left-click the capsule to open a small pixel menu containing Journey and Quit.
 /// </summary>
 public class CapsuleMenu : MonoBehaviour
 {
-    // Temporarily disabled: the menu options are still placeholders.
-    [SerializeField] bool enableMenu = false;
+    [SerializeField] bool enableMenu = true;
     [SerializeField] float clickSlopPixels = 12f;
     [SerializeField] float menuGap = 0.25f;
     [SerializeField] float hoverScale = 1.18f;
 
     const float PanelWidth = 2.2f;
-    const float PanelHeight = 1.8f;
+    const float PanelHeight = 1.2f;
+    const float OptionRowY = 0.3f;
     const int GlyphWidth = 5;
     const int GlyphHeight = 7;
     const float TextPixelsPerUnit = 28f;
 
-    static readonly string[] OptionLabels = { "???", "settings", "quit" };
+    static readonly string[] OptionLabels = { "journey", "quit" };
+    static CapsuleMenu instance;
 
     SpriteRenderer capsule;
     Camera cam;
@@ -44,14 +45,42 @@ public class CapsuleMenu : MonoBehaviour
 
     void Awake()
     {
+        instance = this;
         capsule = GetComponent<SpriteRenderer>();
         cam = Camera.main;
+        HideLegacyHud();
 
         if (!enableMenu)
             return;
 
         CreateMenu();
         SetMenuVisible(false);
+    }
+
+    void HideLegacyHud()
+    {
+        var buttons = FindObjectsOfType<Button>(true);
+        for (int i = 0; i < buttons.Length; i++)
+        {
+            Button button = buttons[i];
+            if (button == null)
+                continue;
+
+            if (button.gameObject.name == "Journey")
+            {
+                button.gameObject.SetActive(false);
+            }
+            else if (button.gameObject.name == "Quit")
+            {
+                button.interactable = false;
+                var graphics = button.GetComponentsInChildren<Graphic>(true);
+                for (int j = 0; j < graphics.Length; j++)
+                {
+                    graphics[j].raycastTarget = false;
+                    graphics[j].enabled = false;
+                }
+            }
+        }
     }
 
     void Update()
@@ -61,11 +90,18 @@ public class CapsuleMenu : MonoBehaviour
 
         if (cam == null)
             cam = Camera.main;
-        if (capsule == null || cam == null || !PetDialogue.HasPlayerName)
+        if (capsule == null || !capsule.enabled || cam == null || !PetDialogue.HasPlayerName)
+        {
+            if (menuVisible)
+                SetMenuVisible(false);
             return;
+        }
 
         if (menuVisible)
         {
+            PlaceMenu();
+            RefreshAvailability();
+
             int hovered = OptionAt(PointerScreen());
             if (hovered != hoveredOption)
             {
@@ -145,14 +181,34 @@ public class CapsuleMenu : MonoBehaviour
 
             var labelObject = new GameObject("CapsuleMenuOption" + i);
             labelObject.transform.SetParent(panelObject.transform, false);
-            labelObject.transform.localPosition = new Vector3(0f, (1 - i) * 0.6f, -0.01f);
+            labelObject.transform.localPosition = new Vector3(0f, OptionY(i), -0.01f);
 
             var renderer = labelObject.AddComponent<SpriteRenderer>();
             renderer.sprite = sprite;
             renderer.color = Color.white;
-            renderer.sortingOrder = 12;
+            renderer.sortingOrder = 13;
             optionRenderers[i] = renderer;
         }
+
+        RefreshAvailability();
+    }
+
+    static float OptionY(int index)
+    {
+        return index == 0 ? OptionRowY : -OptionRowY;
+    }
+
+    void RefreshAvailability()
+    {
+        if (optionRenderers == null || optionRenderers.Length == 0 || optionRenderers[0] == null)
+            return;
+
+        bool available = PetJourney.Instance != null
+            && PetJourney.Instance.JourneyAvailable
+            && !PetCampaign.BlocksJourney;
+        optionRenderers[0].color = available
+            ? Color.white
+            : new Color(0.42f, 0.42f, 0.44f, 1f);
     }
 
     void CreateHighlight()
@@ -172,7 +228,7 @@ public class CapsuleMenu : MonoBehaviour
         highlightObject.transform.SetParent(panelObject.transform, false);
         highlightObject.transform.localScale = new Vector3(
             PanelWidth - 0.12f,
-            PanelHeight / 3f - 0.08f,
+            PanelHeight / 2f - 0.08f,
             1f);
 
         highlightRenderer = highlightObject.AddComponent<SpriteRenderer>();
@@ -185,7 +241,7 @@ public class CapsuleMenu : MonoBehaviour
     Sprite CreatePanelSprite()
     {
         const int width = 110;
-        const int height = 90;
+        const int height = 60;
         const float pixelsPerUnit = 50f;
 
         panelTexture = new Texture2D(width, height, TextureFormat.RGBA32, false);
@@ -202,7 +258,7 @@ public class CapsuleMenu : MonoBehaviour
             for (int x = 0; x < width; x++)
             {
                 bool edge = x < 2 || y < 2 || x >= width - 2 || y >= height - 2;
-                bool line = y == 30 || y == 60;
+                bool line = y == 30;
                 pixels[y * width + x] = edge ? border : (line ? separator : fill);
             }
         }
@@ -278,6 +334,14 @@ public class CapsuleMenu : MonoBehaviour
                 return new[] { ".....", ".####", "#...#", "#...#", ".####", "....#", "....#" };
             case 'u':
                 return new[] { ".....", "#...#", "#...#", "#...#", "#..##", ".##.#", "....." };
+            case 'j':
+                return new[] { "...#.", ".....", "...#.", "...#.", "...#.", "#..#.", ".##.." };
+            case 'o':
+                return new[] { ".....", ".###.", "#...#", "#...#", "#...#", ".###.", "....." };
+            case 'r':
+                return new[] { ".....", "#.##.", "##..#", "#....", "#....", "#....", "....." };
+            case 'y':
+                return new[] { ".....", "#...#", "#...#", ".####", "....#", ".###.", "....." };
             default:
                 return new[] { ".....", ".....", ".....", ".....", ".....", ".....", "....." };
         }
@@ -298,6 +362,7 @@ public class CapsuleMenu : MonoBehaviour
         }
 
         PlaceMenu();
+        RefreshAvailability();
         hoveredOption = -1;
         ApplyHover();
     }
@@ -326,7 +391,7 @@ public class CapsuleMenu : MonoBehaviour
         {
             highlightRenderer.transform.localPosition = new Vector3(
                 0f,
-                (1 - hoveredOption) * 0.6f,
+                OptionY(hoveredOption),
                 -0.005f);
         }
     }
@@ -338,7 +403,33 @@ public class CapsuleMenu : MonoBehaviour
 
         Bounds bounds = capsule.bounds;
         float x = bounds.min.x - menuGap - PanelWidth * 0.5f;
+
+        if (cam != null && cam.orthographic)
+        {
+            float halfWidth = cam.orthographicSize * Mathf.Max(0.01f, cam.aspect);
+            float leftLimit = cam.transform.position.x - halfWidth + 0.05f;
+            if (x - PanelWidth * 0.5f < leftLimit)
+                x = bounds.max.x + menuGap + PanelWidth * 0.5f;
+        }
+
         panelObject.transform.position = new Vector3(x, bounds.center.y, bounds.center.z);
+    }
+
+    public static bool Blocks(Vector2 screenPoint)
+    {
+        return instance != null && instance.MenuContains(screenPoint);
+    }
+
+    bool MenuContains(Vector2 screenPoint)
+    {
+        if (!menuVisible || panelRenderer == null || cam == null)
+            return false;
+
+        Bounds bounds = panelRenderer.bounds;
+        float depth = Mathf.Abs(cam.transform.position.z - bounds.center.z);
+        Vector3 world = cam.ScreenToWorldPoint(new Vector3(screenPoint.x, screenPoint.y, depth));
+        world.z = bounds.center.z;
+        return bounds.Contains(world);
     }
 
     void ExecuteOption(int index)
@@ -346,26 +437,20 @@ public class CapsuleMenu : MonoBehaviour
         switch (index)
         {
             case 0:
-                UnityEngine.Debug.Log("Capsule menu: ??? is a placeholder.");
+                if (PetJourney.Instance == null
+                    || !PetJourney.Instance.JourneyAvailable
+                    || PetCampaign.BlocksJourney)
+                    return;
+
+                SetMenuVisible(false);
+                PetJourney.Instance.StartJourney();
                 break;
 
             case 1:
-                UnityEngine.Debug.Log("Capsule menu: settings is a placeholder.");
-                break;
-
-            case 2:
-                QuitGame();
+                SetMenuVisible(false);
+                QuitRefusal.RequestQuit();
                 break;
         }
-    }
-
-    void QuitGame()
-    {
-#if UNITY_EDITOR
-        UnityEditor.EditorApplication.isPlaying = false;
-#else
-        Application.Quit();
-#endif
     }
 
     bool HitsCapsule(Vector2 screenPoint)
@@ -394,7 +479,7 @@ public class CapsuleMenu : MonoBehaviour
             return -1;
 
         float fromTop = (bounds.max.y - world.y) / Mathf.Max(0.0001f, bounds.size.y);
-        int index = Mathf.Clamp((int)(fromTop * 3f), 0, 2);
+        int index = Mathf.Clamp((int)(fromTop * 2f), 0, 1);
         return index;
     }
 
@@ -409,6 +494,9 @@ public class CapsuleMenu : MonoBehaviour
 
     void OnDestroy()
     {
+        if (instance == this)
+            instance = null;
+
         if (optionSprites != null)
         {
             for (int i = 0; i < optionSprites.Length; i++)

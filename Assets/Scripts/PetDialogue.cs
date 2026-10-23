@@ -15,7 +15,7 @@ public class PetDialogue : MonoBehaviour
 
     [SerializeField] SpriteRenderer speaker;
     [SerializeField] bool playIntroOnStart = true;
-    [SerializeField] string[] introLines = { "Hi, XX! I'm Blinky, your companion pets.", "Intro text 2" };
+    [SerializeField] string[] introLines = { "Hi, XX! I'm Blinky, your companion pet.", "Intro text 2" };
     [SerializeField] string journeyIntroLine = "Press Journey when you want me to go out and bring something back.";
     [SerializeField] float journeyIntroDelay = 3f;
     [SerializeField] float clickSlopPixels = 18f;
@@ -41,7 +41,8 @@ public class PetDialogue : MonoBehaviour
         Greet,
         Stay,
         TeachSend,
-        TeachClick
+        TeachClick,
+        Welcome
     }
 
     OpeningBeat openingBeat;
@@ -71,6 +72,7 @@ public class PetDialogue : MonoBehaviour
     Coroutine namePromptMoveRoutine;
     Coroutine namePromptAppearRoutine;
     Transform petRoot;
+    bool namePromptBusy;
     static Sprite promptPanelSprite;
     Transform headBubble;
     Vector3 headLocalOffset;
@@ -79,6 +81,8 @@ public class PetDialogue : MonoBehaviour
     public static string PlayerName { get; private set; }
     public static bool HasPlayerName => !string.IsNullOrEmpty(PlayerName);
     public bool IsOpen => visible;
+    public Transform PetRoot => petRoot;
+    public bool CanDragPet => petRoot != null && !namePromptBusy && !PetJourney.PetIsAway;
 
     public static void Say(string text)
     {
@@ -266,7 +270,7 @@ public class PetDialogue : MonoBehaviour
         string savedName = PlayerPrefs.GetString("PetDialogue.PlayerName", string.Empty);
         PlayerName = string.IsNullOrEmpty(savedName) ? null : savedName;
         int beat = PlayerPrefs.GetInt("PetDialogue.OpeningBeat", (int)OpeningBeat.None);
-        if (beat < 0 || beat > (int)OpeningBeat.TeachClick)
+        if (beat < 0 || beat > (int)OpeningBeat.Welcome)
             beat = (int)OpeningBeat.None;
         openingBeat = (OpeningBeat)beat;
         PetStory.LoadSaved();
@@ -304,7 +308,10 @@ public class PetDialogue : MonoBehaviour
             petRoot.localRotation = Quaternion.identity;
         }
 
-        bool atCorner = openingBeat != OpeningBeat.Greet && openingBeat != OpeningBeat.AskName;
+        bool atCorner = openingBeat != OpeningBeat.Greet
+            && openingBeat != OpeningBeat.AskName
+            && openingBeat != OpeningBeat.None
+            && openingBeat != OpeningBeat.Welcome;
         transform.localPosition = atCorner ? new Vector3(6.6f, -3f, 0f) : Vector3.zero;
         transform.localRotation = Quaternion.identity;
         transform.localScale = new Vector3(0.5f, 0.5f, 0.5f);
@@ -320,7 +327,11 @@ public class PetDialogue : MonoBehaviour
 
         transform.localPosition = atCorner ? new Vector3(6.6f, -3f, 0f) : Vector3.zero;
 
-        if (!PetJourney.PetIsAway && (openingBeat == OpeningBeat.None || openingBeat == OpeningBeat.TeachSend || openingBeat == OpeningBeat.TeachClick))
+        if (!PetJourney.PetIsAway
+            && (openingBeat == OpeningBeat.None
+                || openingBeat == OpeningBeat.Welcome
+                || openingBeat == OpeningBeat.TeachSend
+                || openingBeat == OpeningBeat.TeachClick))
             PetJourney.ShowJourneyButton();
 
         bool continueFirstReturn = false;
@@ -341,6 +352,8 @@ public class PetDialogue : MonoBehaviour
 
         if (openingBeat == OpeningBeat.AskName)
             SetOpening(OpeningBeat.Greet);
+        else if (openingBeat == OpeningBeat.None && !continueFirstReturn && !PetJourney.PetIsAway)
+            SetOpening(OpeningBeat.Welcome);
 
         switch (openingBeat)
         {
@@ -353,6 +366,16 @@ public class PetDialogue : MonoBehaviour
             case OpeningBeat.TeachSend:
             case OpeningBeat.TeachClick:
                 Show(TeachSendLine());
+                break;
+            case OpeningBeat.None:
+            case OpeningBeat.Welcome:
+                if (!continueFirstReturn && !PetJourney.PetIsAway)
+                {
+                    string opening = IntroText(0);
+                    if (string.IsNullOrEmpty(opening))
+                        opening = "Hello, " + PlayerName + ".";
+                    Show(opening);
+                }
                 break;
         }
 
@@ -454,6 +477,21 @@ public class PetDialogue : MonoBehaviour
 
     void AdvanceIntroOrHide()
     {
+        if (openingBeat == OpeningBeat.Welcome)
+        {
+            if (PetJourney.Instance != null && PetJourney.Instance.CompletedTrips >= 1)
+            {
+                SetOpening(OpeningBeat.None);
+                Show("Hello again, " + PlayerName + ".");
+            }
+            else
+            {
+                SetOpening(OpeningBeat.Greet);
+                Show("Hello, " + PlayerName + ".");
+            }
+            return;
+        }
+
         if (openingBeat == OpeningBeat.AskName)
         {
             SetOpening(OpeningBeat.None);
@@ -542,7 +580,7 @@ public class PetDialogue : MonoBehaviour
             name = "there";
         if (!string.IsNullOrEmpty(line) && line.Contains("XX"))
             return line.Replace("XX", name);
-        return "Hi, " + name + "! I'm Blinky, your companion pets.";
+        return "Hi, " + name + "! I'm Blinky, your companion pet.";
     }
 
     public static Canvas OverlayCanvas()
@@ -566,6 +604,7 @@ public class PetDialogue : MonoBehaviour
 
     void ShowNamePrompt()
     {
+        namePromptBusy = true;
         namePromptHomePosition = petRoot != null ? petRoot.localPosition : Vector3.zero;
 
         Canvas canvas = OverlayCanvas();
@@ -682,6 +721,8 @@ public class PetDialogue : MonoBehaviour
 
         if (speaker != null && !PetJourney.PetIsAway)
             speaker.enabled = true;
+
+        namePromptBusy = false;
 
         bool continued = openingBeat == OpeningBeat.None
             && PetJourney.Instance != null
@@ -1167,7 +1208,7 @@ public class PetDialogue : MonoBehaviour
     static string TeachSendLine()
     {
         string name = string.IsNullOrWhiteSpace(PlayerName) ? "there" : PlayerName;
-        return "Alright, " + name + ". It's time I showed you how to send me out to search for memes. Click me. See the first button on my right? Click it, and I'll head out to look for memes.";
+        return "Alright, " + name + ". It's time I showed you how to send me out to search for memes. Click me, then choose Journey from my menu, and I'll head out to look for memes.";
     }
 
     void HoldIdle()

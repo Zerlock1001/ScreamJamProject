@@ -2328,7 +2328,7 @@ MonoBehaviour:
   speaker: {fileID: 1877028148}
   playIntroOnStart: 1
   introLines:
-  - Hi, XX! I'm Blinky, your companion pets.
+  - Hi, XX! I'm Blinky, your companion pet.
   - Intro text 2
   journeyIntroLine: Press Journey when you want me to go out and bring something
     back.
@@ -2348,7 +2348,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d5ce2d260c1be26418bee4dc394f406b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  enableMenu: 0
+  enableMenu: 1
   clickSlopPixels: 12
   menuGap: 0.25
   hoverScale: 1.18

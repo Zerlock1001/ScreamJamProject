@@ -75,6 +75,17 @@ public class QuitRefusal : MonoBehaviour
         PetDialogue.PlaySequence(Lines);
     }
 
+    public static void RequestQuit()
+    {
+        if (instance != null)
+        {
+            instance.OnQuitClicked();
+            return;
+        }
+
+        QuitNow();
+    }
+
     static void QuitNow()
     {
 #if UNITY_EDITOR

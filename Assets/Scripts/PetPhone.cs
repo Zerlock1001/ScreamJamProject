@@ -18,6 +18,8 @@ public class PetPhone : MonoBehaviour
     RectTransform chatContent;
     GameObject visual;
     CanvasGroup phoneGroup;
+    GameObject phoneIcon;
+    Text emptyChatText;
     Button launcher;
     int pictureWindows;
     GameObject nameRow;
@@ -86,9 +88,8 @@ public class PetPhone : MonoBehaviour
             return;
 
         Instance.ActivateHost();
-        Instance.BindLauncher();
-        if (Instance.launcher != null)
-            Instance.launcher.gameObject.SetActive(true);
+        if (Instance.phoneIcon != null)
+            Instance.phoneIcon.SetActive(true);
     }
 
     public void Toggle()
@@ -267,7 +268,7 @@ public class PetPhone : MonoBehaviour
         if (statusText == null)
             return;
 
-        statusText.text = away ? "Away" : "Home";
+        statusText.text = away ? "Blinky · Away" : "Blinky · Online";
         statusText.color = away
             ? new Color(0.62f, 0.36f, 0.16f, 1f)
             : new Color(0.22f, 0.42f, 0.28f, 1f);
@@ -327,21 +328,27 @@ public class PetPhone : MonoBehaviour
         if (chatContent == null || string.IsNullOrEmpty(text))
             return;
 
-        var label = CreateText("Label", transform, text, MessageFontSize, TextAnchor.UpperLeft, new Color(0.16f, 0.16f, 0.18f, 1f));
+        if (emptyChatText != null)
+            emptyChatText.gameObject.SetActive(false);
+
+        var label = CreateText("Label", transform, text, MessageFontSize, TextAnchor.UpperLeft, new Color(0.12f, 0.13f, 0.16f, 1f));
         label.horizontalOverflow = HorizontalWrapMode.Wrap;
         label.verticalOverflow = VerticalWrapMode.Overflow;
         float textWidth = BubbleWidth - BubblePadX * 2f;
         float bubbleHeight = PreferredTextHeight(label, textWidth) + BubblePadY * 2f;
 
         RectTransform row = BeginChatRow("MessageRow", BubbleWidth, bubbleHeight);
-        var bubble = new GameObject("Message", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(LayoutElement));
+        var bubble = new GameObject("Message", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(LayoutElement), typeof(Shadow));
         bubble.transform.SetParent(row, false);
         label.transform.SetParent(bubble.transform, false);
         var image = bubble.GetComponent<Image>();
-        image.sprite = Skin();
-        image.type = Image.Type.Simple;
-        image.color = new Color(0.86f, 0.88f, 0.9f, 1f);
+        image.sprite = BubbleSprite();
+        image.type = Image.Type.Sliced;
+        image.color = new Color(0.90f, 0.93f, 0.97f, 1f);
         image.raycastTarget = false;
+        var shadow = bubble.GetComponent<Shadow>();
+        shadow.effectColor = new Color(0f, 0f, 0f, 0.12f);
+        shadow.effectDistance = new Vector2(0f, -1.5f);
         var bubbleRect = bubble.GetComponent<RectTransform>();
         bubbleRect.sizeDelta = new Vector2(BubbleWidth, bubbleHeight);
         var layout = bubble.GetComponent<LayoutElement>();
@@ -380,14 +387,17 @@ public class PetPhone : MonoBehaviour
         if (chatContent == null)
             return;
 
+        if (emptyChatText != null)
+            emptyChatText.gameObject.SetActive(false);
+
         const float cardWidth = 180f;
         RectTransform row = BeginChatRow("PostcardRow", cardWidth, 34f);
         var card = new GameObject("Postcard", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(VerticalLayoutGroup), typeof(ContentSizeFitter), typeof(LayoutElement));
         card.transform.SetParent(row, false);
         card.GetComponent<LayoutElement>().preferredWidth = cardWidth;
         var cardImage = card.GetComponent<Image>();
-        cardImage.sprite = Skin();
-        cardImage.type = Image.Type.Simple;
+        cardImage.sprite = BubbleSprite();
+        cardImage.type = Image.Type.Sliced;
         cardImage.color = Color.white;
         cardImage.raycastTarget = false;
         var layout = card.GetComponent<VerticalLayoutGroup>();
@@ -465,9 +475,9 @@ public class PetPhone : MonoBehaviour
         var frameObject = new GameObject("Avatar", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(LayoutElement));
         frameObject.transform.SetParent(parent, false);
         var frame = frameObject.GetComponent<Image>();
-        frame.sprite = Skin();
-        frame.type = Image.Type.Simple;
-        frame.color = new Color(0.86f, 0.84f, 0.8f, 1f);
+        frame.sprite = BubbleSprite();
+        frame.type = Image.Type.Sliced;
+        frame.color = new Color(0.90f, 0.89f, 0.86f, 1f);
         frame.raycastTarget = false;
         var frameRect = frameObject.GetComponent<RectTransform>();
         frameRect.sizeDelta = new Vector2(size, size);
@@ -586,11 +596,90 @@ public class PetPhone : MonoBehaviour
             break;
         }
 
-        if (launcher == null)
+        // The old text button is replaced by the phone icon at the bottom-right.
+        if (launcher != null)
+            launcher.gameObject.SetActive(false);
+    }
+
+    void CreatePhoneIcon()
+    {
+        if (phoneIcon != null)
             return;
 
-        launcher.onClick.AddListener(Toggle);
-        launcher.gameObject.SetActive(false);
+        Canvas canvas = GetComponentInParent<Canvas>();
+        if (canvas == null)
+            return;
+
+        phoneIcon = new GameObject(
+            "PhoneIcon",
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(Image),
+            typeof(Button),
+            typeof(Shadow));
+        phoneIcon.transform.SetParent(canvas.transform, false);
+        var rect = phoneIcon.GetComponent<RectTransform>();
+        rect.anchorMin = new Vector2(1f, 0f);
+        rect.anchorMax = new Vector2(1f, 0f);
+        rect.pivot = new Vector2(1f, 0f);
+        rect.anchoredPosition = new Vector2(-24f, 24f);
+        rect.sizeDelta = new Vector2(56f, 72f);
+
+        var body = phoneIcon.GetComponent<Image>();
+        body.sprite = BubbleSprite();
+        body.type = Image.Type.Sliced;
+        body.color = new Color(0.15f, 0.16f, 0.19f, 1f);
+        body.raycastTarget = true;
+
+        var shadow = phoneIcon.GetComponent<Shadow>();
+        shadow.effectColor = new Color(0f, 0f, 0f, 0.22f);
+        shadow.effectDistance = new Vector2(0f, -3f);
+
+        var screenObject = new GameObject("Screen", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        screenObject.transform.SetParent(phoneIcon.transform, false);
+        var screenRect = screenObject.GetComponent<RectTransform>();
+        screenRect.anchorMin = Vector2.zero;
+        screenRect.anchorMax = Vector2.one;
+        screenRect.offsetMin = new Vector2(8f, 16f);
+        screenRect.offsetMax = new Vector2(-8f, -14f);
+        var screenImage = screenObject.GetComponent<Image>();
+        screenImage.sprite = BubbleSprite();
+        screenImage.type = Image.Type.Sliced;
+        screenImage.color = new Color(0.82f, 0.90f, 0.96f, 1f);
+        screenImage.raycastTarget = false;
+
+        var speakerObject = new GameObject("Speaker", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        speakerObject.transform.SetParent(phoneIcon.transform, false);
+        var speakerRect = speakerObject.GetComponent<RectTransform>();
+        speakerRect.anchorMin = new Vector2(0.5f, 1f);
+        speakerRect.anchorMax = new Vector2(0.5f, 1f);
+        speakerRect.pivot = new Vector2(0.5f, 1f);
+        speakerRect.anchoredPosition = new Vector2(0f, -7f);
+        speakerRect.sizeDelta = new Vector2(18f, 3f);
+        var speakerImage = speakerObject.GetComponent<Image>();
+        speakerImage.sprite = Skin();
+        speakerImage.type = Image.Type.Simple;
+        speakerImage.color = new Color(0.55f, 0.58f, 0.62f, 1f);
+        speakerImage.raycastTarget = false;
+
+        var homeObject = new GameObject("Home", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        homeObject.transform.SetParent(phoneIcon.transform, false);
+        var homeRect = homeObject.GetComponent<RectTransform>();
+        homeRect.anchorMin = new Vector2(0.5f, 0f);
+        homeRect.anchorMax = new Vector2(0.5f, 0f);
+        homeRect.pivot = new Vector2(0.5f, 0f);
+        homeRect.anchoredPosition = new Vector2(0f, 6f);
+        homeRect.sizeDelta = new Vector2(8f, 8f);
+        var homeImage = homeObject.GetComponent<Image>();
+        homeImage.sprite = Skin();
+        homeImage.type = Image.Type.Simple;
+        homeImage.color = new Color(0.55f, 0.58f, 0.62f, 1f);
+        homeImage.raycastTarget = false;
+
+        var button = phoneIcon.GetComponent<Button>();
+        button.targetGraphic = body;
+        button.onClick.AddListener(Toggle);
+        phoneIcon.transform.SetAsLastSibling();
     }
 
     void Build()
@@ -634,12 +723,13 @@ public class PetPhone : MonoBehaviour
         titleLayout.childForceExpandHeight = false;
         titleBar.gameObject.AddComponent<WindowDrag>().Target = root;
 
-        statusText = CreateText("Status", titleBar, "Home", 13, TextAnchor.MiddleCenter, new Color(0.25f, 0.25f, 0.28f, 1f));
+        statusText = CreateText("Status", titleBar, "Blinky · Online", 12, TextAnchor.MiddleCenter, new Color(0.22f, 0.42f, 0.28f, 1f));
         statusText.gameObject.AddComponent<LayoutElement>().preferredHeight = 20f;
-        var header = CreateText("Name", titleBar, "Blinky", 20, TextAnchor.MiddleCenter, new Color(0.12f, 0.12f, 0.14f, 1f));
-        header.gameObject.AddComponent<LayoutElement>().preferredHeight = 26f;
+        var header = CreateText("Title", titleBar, "Chat", 21, TextAnchor.MiddleCenter, new Color(0.12f, 0.12f, 0.14f, 1f));
+        header.fontStyle = FontStyle.Bold;
+        header.gameObject.AddComponent<LayoutElement>().preferredHeight = 28f;
 
-        var viewport = CreatePanel("Chat", screen, null, new Color(1f, 1f, 1f, 0.01f));
+        var viewport = CreatePanel("Chat", screen, null, new Color(0.96f, 0.96f, 0.95f, 1f));
         var viewportLayout = viewport.gameObject.AddComponent<LayoutElement>();
         viewportLayout.flexibleHeight = 1f;
         viewportLayout.preferredHeight = 360f;
@@ -658,8 +748,8 @@ public class PetPhone : MonoBehaviour
         chatContent.offsetMin = Vector2.zero;
         chatContent.offsetMax = Vector2.zero;
         var contentLayout = contentObject.GetComponent<VerticalLayoutGroup>();
-        contentLayout.padding = new RectOffset((int)ChatPadLeft, (int)ChatPadRight, 4, 4);
-        contentLayout.spacing = 8f;
+        contentLayout.padding = new RectOffset((int)ChatPadLeft, (int)ChatPadRight, 8, 8);
+        contentLayout.spacing = 10f;
         contentLayout.childAlignment = TextAnchor.UpperLeft;
         contentLayout.childControlWidth = false;
         contentLayout.childControlHeight = true;
@@ -670,6 +760,16 @@ public class PetPhone : MonoBehaviour
         contentFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
         chatScroll.viewport = viewport;
         chatScroll.content = chatContent;
+
+        emptyChatText = CreateText("EmptyChat", viewport, "No messages yet.\nSay hi to Blinky.", 14, TextAnchor.MiddleCenter, new Color(0.48f, 0.47f, 0.45f, 1f));
+        var emptyRect = emptyChatText.rectTransform;
+        emptyRect.anchorMin = new Vector2(0.5f, 0.5f);
+        emptyRect.anchorMax = new Vector2(0.5f, 0.5f);
+        emptyRect.pivot = new Vector2(0.5f, 0.5f);
+        emptyRect.anchoredPosition = Vector2.zero;
+        emptyRect.sizeDelta = new Vector2(220f, 52f);
+        emptyChatText.fontStyle = FontStyle.Italic;
+        emptyChatText.raycastTarget = false;
 
         var divider = new GameObject("Divider", typeof(RectTransform), typeof(LayoutElement));
         divider.transform.SetParent(screen, false);
@@ -714,6 +814,7 @@ public class PetPhone : MonoBehaviour
         SetAway(false);
         visual.SetActive(false);
         BindLauncher();
+        CreatePhoneIcon();
     }
 
     static RectTransform CreatePanel(string name, Transform parent, Sprite sprite, Color color)
@@ -751,7 +852,47 @@ public class PetPhone : MonoBehaviour
     }
 
     static Sprite skinSprite;
+    static Sprite bubbleSprite;
     static Sprite pictureIcon;
+
+    static Sprite BubbleSprite()
+    {
+        if (bubbleSprite != null)
+            return bubbleSprite;
+
+        const int size = 32;
+        const int radius = 10;
+        var texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        texture.filterMode = FilterMode.Bilinear;
+        texture.wrapMode = TextureWrapMode.Clamp;
+        var pixels = new Color[size * size];
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                int cx = x < radius ? radius - x - 1 : (x >= size - radius ? x - (size - radius) : 0);
+                int cy = y < radius ? radius - y - 1 : (y >= size - radius ? y - (size - radius) : 0);
+                bool outside = cx > 0 && cy > 0 && cx * cx + cy * cy > radius * radius;
+                pixels[y * size + x] = outside
+                    ? new Color(1f, 1f, 1f, 0f)
+                    : Color.white;
+            }
+        }
+
+        texture.SetPixels(pixels);
+        texture.Apply(false, false);
+        texture.hideFlags = HideFlags.HideAndDontSave;
+        bubbleSprite = Sprite.Create(
+            texture,
+            new Rect(0f, 0f, size, size),
+            new Vector2(0.5f, 0.5f),
+            100f,
+            0,
+            SpriteMeshType.FullRect,
+            new Vector4(12f, 12f, 12f, 12f));
+        bubbleSprite.hideFlags = HideFlags.HideAndDontSave;
+        return bubbleSprite;
+    }
 
     static Sprite PictureIcon()
     {
