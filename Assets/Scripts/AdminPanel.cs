@@ -1,25 +1,27 @@
 using System.Collections;
+using System.Net;
+using System.Net.Sockets;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 /// <summary>
-/// In-game Kali-style administrator panel. Opened from the phone chat with
-/// "/adminpanel start". The avatar and display name are intentionally
-/// placeholders until the final admin identity is supplied.
+/// In-game monochrome administrator panel. Opened from the phone chat with
+/// "/adminpanel start". The avatar and display name are placeholders until
+/// the final admin identity is supplied.
 /// </summary>
 public class AdminPanel : MonoBehaviour
 {
-    const string AdminName = "admin";
+    const string AdminName = "OcOm_Admin123";
     const string AdminRole = "ADMINISTRATOR // ROOT";
 
-    static readonly Color PanelColor = new Color(0.025f, 0.045f, 0.07f, 0.98f);
-    static readonly Color PanelDark = new Color(0.015f, 0.028f, 0.045f, 1f);
-    static readonly Color Cyan = new Color(0.12f, 0.86f, 0.90f, 1f);
-    static readonly Color CyanDim = new Color(0.16f, 0.48f, 0.54f, 1f);
-    static readonly Color TextColor = new Color(0.72f, 0.88f, 0.94f, 1f);
-    static readonly Color Muted = new Color(0.38f, 0.54f, 0.60f, 1f);
-    static readonly Color Green = new Color(0.32f, 0.95f, 0.62f, 1f);
+    static readonly Color PanelColor = new Color(0.035f, 0.035f, 0.04f, 0.98f);
+    static readonly Color PanelDark = new Color(0.012f, 0.012f, 0.015f, 1f);
+    static readonly Color BorderColor = new Color(0.78f, 0.78f, 0.80f, 0.7f);
+    static readonly Color AccentColor = new Color(0.86f, 0.86f, 0.88f, 1f);
+    static readonly Color TextColor = new Color(0.88f, 0.88f, 0.90f, 1f);
+    static readonly Color Muted = new Color(0.48f, 0.48f, 0.50f, 1f);
+    static readonly Color StatusColor = new Color(0.78f, 0.78f, 0.80f, 1f);
 
     static AdminPanel instance;
     GameObject root;
@@ -220,7 +222,7 @@ public class AdminPanel : MonoBehaviour
         background.color = PanelColor;
         background.raycastTarget = true;
         var outline = root.GetComponent<Outline>();
-        outline.effectColor = new Color(Cyan.r, Cyan.g, Cyan.b, 0.65f);
+        outline.effectColor = BorderColor;
         outline.effectDistance = new Vector2(1f, -1f);
 
         var drag = root.AddComponent<WindowDrag>();
@@ -235,7 +237,7 @@ public class AdminPanel : MonoBehaviour
         topBar.offsetMax = Vector2.zero;
         topBar.gameObject.AddComponent<WindowDrag>().Target = rect;
 
-        var accent = MakePanel("TopAccent", topBar, Cyan);
+        var accent = MakePanel("TopAccent", topBar, AccentColor);
         var accentRect = accent;
         accentRect.anchorMin = new Vector2(0f, 0f);
         accentRect.anchorMax = new Vector2(1f, 0f);
@@ -243,14 +245,14 @@ public class AdminPanel : MonoBehaviour
         accentRect.sizeDelta = new Vector2(0f, 2f);
         accentRect.anchoredPosition = Vector2.zero;
 
-        var title = MakeText("Title", topBar, "KALI // ADMIN PANEL", 16, TextAnchor.MiddleLeft, Cyan);
+        var title = MakeText("Title", topBar, "ADMINPANEL", 16, TextAnchor.MiddleLeft, AccentColor);
         title.fontStyle = FontStyle.Bold;
         Stretch(title.rectTransform, 0f);
         title.rectTransform.offsetMin = new Vector2(20f, 0f);
         title.rectTransform.offsetMax = new Vector2(-52f, 0f);
         title.raycastTarget = false;
 
-        var closeButton = MakeButton("Close", topBar, new Color(0.62f, 0.16f, 0.19f, 1f), "X", 15);
+        var closeButton = MakeButton("Close", topBar, new Color(0.16f, 0.16f, 0.18f, 1f), "X", 15);
         var closeRect = closeButton.GetComponent<RectTransform>();
         closeRect.anchorMin = new Vector2(1f, 1f);
         closeRect.anchorMax = new Vector2(1f, 1f);
@@ -259,7 +261,7 @@ public class AdminPanel : MonoBehaviour
         closeRect.sizeDelta = new Vector2(28f, 28f);
         closeButton.onClick.AddListener(Close);
 
-        avatarImage = MakePanel("Avatar", root.transform, new Color(0.05f, 0.16f, 0.19f, 1f)).GetComponent<Image>();
+        avatarImage = MakePanel("Avatar", root.transform, new Color(0.01f, 0.01f, 0.015f, 1f)).GetComponent<Image>();
         avatarImage.sprite = AvatarSprite();
         avatarImage.type = Image.Type.Simple;
         avatarImage.color = Color.white;
@@ -270,7 +272,7 @@ public class AdminPanel : MonoBehaviour
         avatarRect.anchoredPosition = new Vector2(22f, -58f);
         avatarRect.sizeDelta = new Vector2(54f, 54f);
 
-        var avatarLetter = MakeText("AvatarLetter", avatarRect, "A", 24, TextAnchor.MiddleCenter, new Color(0.78f, 0.98f, 1f, 1f));
+        var avatarLetter = MakeText("AvatarLetter", avatarRect, "O", 24, TextAnchor.MiddleCenter, Color.white);
         avatarLetter.fontStyle = FontStyle.Bold;
         Stretch(avatarLetter.rectTransform, 0f);
         avatarLetter.raycastTarget = false;
@@ -285,7 +287,7 @@ public class AdminPanel : MonoBehaviour
         usernameRect.sizeDelta = new Vector2(300f, 26f);
         usernameText.raycastTarget = false;
 
-        roleText = MakeText("Role", root.transform, AdminRole, 11, TextAnchor.MiddleLeft, CyanDim);
+        roleText = MakeText("Role", root.transform, AdminRole, 11, TextAnchor.MiddleLeft, Muted);
         var roleRect = roleText.rectTransform;
         roleRect.anchorMin = new Vector2(0f, 1f);
         roleRect.anchorMax = new Vector2(0f, 1f);
@@ -294,7 +296,7 @@ public class AdminPanel : MonoBehaviour
         roleRect.sizeDelta = new Vector2(300f, 20f);
         roleText.raycastTarget = false;
 
-        statusText = MakeText("Status", root.transform, "● SESSION ACTIVE", 11, TextAnchor.MiddleRight, Green);
+        statusText = MakeText("Status", root.transform, "● SESSION ACTIVE", 11, TextAnchor.MiddleRight, StatusColor);
         statusText.fontStyle = FontStyle.Bold;
         var statusRect = statusText.rectTransform;
         statusRect.anchorMin = new Vector2(1f, 1f);
@@ -304,7 +306,7 @@ public class AdminPanel : MonoBehaviour
         statusRect.sizeDelta = new Vector2(220f, 20f);
         statusText.raycastTarget = false;
 
-        var separator = MakePanel("Separator", root.transform, new Color(0.12f, 0.86f, 0.90f, 0.28f));
+        var separator = MakePanel("Separator", root.transform, new Color(0.70f, 0.70f, 0.72f, 0.28f));
         var separatorRect = separator;
         separatorRect.anchorMin = new Vector2(0f, 1f);
         separatorRect.anchorMax = new Vector2(1f, 1f);
@@ -319,17 +321,20 @@ public class AdminPanel : MonoBehaviour
         terminalRect.offsetMin = new Vector2(20f, 42f);
         terminalRect.offsetMax = new Vector2(-20f, -136f);
         var terminalOutline = terminal.gameObject.AddComponent<Outline>();
-        terminalOutline.effectColor = new Color(Cyan.r, Cyan.g, Cyan.b, 0.22f);
+        terminalOutline.effectColor = new Color(0.72f, 0.72f, 0.74f, 0.26f);
         terminalOutline.effectDistance = new Vector2(1f, -1f);
 
         var terminalText = MakeText(
             "Output",
             terminal,
-            "root@kali:~# access --admin\n" +
-            "<color=#52f2a2>[ OK ]</color> SECURE CHANNEL ESTABLISHED\n" +
-            "<color=#52f2a2>[ OK ]</color> NODE: localhost\n" +
-            "<color=#ffb454>[ .. ]</color> ADMIN PRIVILEGES LOCKED\n" +
-            "<color=#3fdfe8>//ENTER ADMIN PASSWORD:</color>",
+            "admin@panel:~# access --admin\n" +
+            "<color=#e0e0e2>[ OK ]</color> SECURE CHANNEL ESTABLISHED\n" +
+            "<color=#c0c0c4>[FAIL]</color> CREDENTIAL VERIFICATION FAILED\n" +
+            "<color=#c0c0c4>[FAIL]</color> IDENTITY COULD NOT BE VERIFIED\n" +
+            "<color=#9a9a9e>[WARN]</color> TRUST CHAIN UNAVAILABLE\n" +
+            "<color=#9a9a9e>[WARN]</color> ACCESS TOKEN NOT VERIFIED\n" +
+            "IP: " + LocalIp() + "\n" +
+            "<color=#ffffff>//ENTER ADMIN PASSWORD:</color>",
             12,
             TextAnchor.UpperLeft,
             TextColor);
@@ -352,28 +357,24 @@ public class AdminPanel : MonoBehaviour
         passwordRect.offsetMax = new Vector2(-14f, 44f);
 
         var passwordImage = passwordObject.GetComponent<Image>();
-        passwordImage.color = new Color(0.015f, 0.05f, 0.07f, 1f);
+        passwordImage.color = new Color(0.008f, 0.008f, 0.01f, 1f);
         passwordImage.raycastTarget = true;
         var passwordOutline = passwordObject.GetComponent<Outline>();
-        passwordOutline.effectColor = new Color(Cyan.r, Cyan.g, Cyan.b, 0.35f);
+        passwordOutline.effectColor = BorderColor;
         passwordOutline.effectDistance = new Vector2(1f, -1f);
 
         var passwordText = MakeText("Text", passwordRect, string.Empty, 13, TextAnchor.MiddleLeft, Color.white);
         Stretch(passwordText.rectTransform, 8f);
         passwordText.supportRichText = false;
-        var passwordPlaceholder = MakeText("Placeholder", passwordRect, "password", 13, TextAnchor.MiddleLeft, Muted);
-        Stretch(passwordPlaceholder.rectTransform, 8f);
-        passwordPlaceholder.fontStyle = FontStyle.Italic;
 
         passwordInput = passwordObject.GetComponent<InputField>();
         passwordInput.targetGraphic = passwordImage;
         passwordInput.textComponent = passwordText;
-        passwordInput.placeholder = passwordPlaceholder;
         passwordInput.contentType = InputField.ContentType.Password;
         passwordInput.lineType = InputField.LineType.SingleLine;
         passwordInput.characterLimit = 64;
-        passwordInput.caretColor = Cyan;
-        passwordInput.selectionColor = new Color(Cyan.r, Cyan.g, Cyan.b, 0.35f);
+        passwordInput.caretColor = AccentColor;
+        passwordInput.selectionColor = new Color(0.72f, 0.72f, 0.74f, 0.35f);
         passwordInput.onSubmit.AddListener(SubmitAdminPassword);
 
         var footer = MakeText("Footer", root.transform, "AUTHORIZED ACCESS ONLY    //    X TO CLOSE", 10, TextAnchor.MiddleCenter, Muted);
@@ -445,6 +446,26 @@ public class AdminPanel : MonoBehaviour
         rect.offsetMax = new Vector2(-right, -top);
     }
 
+    static string LocalIp()
+    {
+        try
+        {
+            IPHostEntry host = Dns.GetHostEntry(Dns.GetHostName());
+            for (int i = 0; i < host.AddressList.Length; i++)
+            {
+                IPAddress address = host.AddressList[i];
+                if (address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(address))
+                    return address.ToString();
+            }
+        }
+        catch
+        {
+            // Fall back to a loopback address when no network adapter is available.
+        }
+
+        return "127.0.0.1";
+    }
+
     static Sprite AvatarSprite()
     {
         if (avatarSprite != null)
@@ -467,9 +488,9 @@ public class AdminPanel : MonoBehaviour
                 if (distance > radius)
                     pixels[y * size + x] = new Color(0f, 0f, 0f, 0f);
                 else if (distance > radius - 2f)
-                    pixels[y * size + x] = new Color(0.12f, 0.86f, 0.90f, 1f);
+                    pixels[y * size + x] = new Color(0.82f, 0.82f, 0.84f, 1f);
                 else
-                    pixels[y * size + x] = new Color(0.04f, 0.14f, 0.17f, 1f);
+                    pixels[y * size + x] = new Color(0.015f, 0.015f, 0.02f, 1f);
             }
         }
 
