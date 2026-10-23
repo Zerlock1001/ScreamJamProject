@@ -94,7 +94,7 @@ namespace ScreamJam.Debugging
             RegisterCommand("tempclear", "/tempclear", "Delete cached photos, screenshots, and recordings.", _ => ClearCachedFiles());
             RegisterCommand("ip", "/ip", "Show the player's approximate city.", _ => BeginIpLookup());
             RegisterCommand("sayip", "/sayip", "Ask whether the player lives in their IP city.", _ => BeginSayIp());
-            RegisterCommand("sweeper", "/sweeper [passcode]", "Open the daily minesweeper mini game, or print its admin passcode.", HandleSweeper);
+            RegisterCommand("sweeper", "/sweeper [passcode|code]", "Open the daily minesweeper mini game, or print its admin passcode.", HandleSweeper);
             RegisterCommand("supercooleffect", "/supercooleffect", "Freeze the screen with a glitch grid effect.", _ => SuperCoolEffect.Trigger());
             RegisterCommand("quit", "/quit", "Quit the game.", _ => QuitGame());
             _open = false;
@@ -953,7 +953,8 @@ namespace ScreamJam.Debugging
             }
 
             if (args.Length == 1 &&
-                string.Equals(args[0], "passcode", StringComparison.OrdinalIgnoreCase))
+                (string.Equals(args[0], "passcode", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(args[0], "code", StringComparison.OrdinalIgnoreCase)))
             {
                 if (!DailyMiniGame.HasGame)
                 {
@@ -972,7 +973,7 @@ namespace ScreamJam.Debugging
                 return;
             }
 
-            AddCommandLine("Usage: /sweeper [passcode]", LogType.Warning);
+            AddCommandLine("Usage: /sweeper [passcode|code]", LogType.Warning);
         }
 
         private void HandleScreenshot(string[] args)
