@@ -112,6 +112,8 @@ public class SuperCoolEffect : MonoBehaviour
     CursorLockMode cursorPreviousLock;
     bool phoneIconWasVisible;
     bool phoneIconSuppressed;
+    bool adminPanelWasOpen;
+    bool adminPanelSuppressed;
 #pragma warning disable 0169, 0414
     bool cursorPinned;
     bool nativeCursorHidden;
@@ -170,12 +172,16 @@ public class SuperCoolEffect : MonoBehaviour
         cursorPreviousLock = Cursor.lockState;
         Cursor.visible = false;
         Cursor.lockState = CursorLockMode.None;
-        PetJourney.SetMoodBarVisible(false);
+        PetJourney.SetMoodBarVisible(false, true);
         phoneIconWasVisible = PetPhone.PhoneIconVisible;
         phoneIconSuppressed = true;
         PetPhone.SetPhoneIconVisible(false);
         PetPhone.SetPhoneUiHidden(true);
         PetJourney.SetGalleryHidden(true);
+        adminPanelWasOpen = AdminPanel.IsOpen;
+        adminPanelSuppressed = adminPanelWasOpen;
+        if (adminPanelWasOpen)
+            AdminPanel.HideForEffect();
 
 #if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
         nativeCursorHidden = true;
@@ -770,6 +776,18 @@ public class SuperCoolEffect : MonoBehaviour
         PetPhone.SetPhoneIconVisible(phoneIconWasVisible);
     }
 
+    void RestoreAdminPanel()
+    {
+        if (!adminPanelSuppressed)
+            return;
+
+        adminPanelSuppressed = false;
+        bool wasOpen = adminPanelWasOpen;
+        adminPanelWasOpen = false;
+        if (wasOpen)
+            AdminPanel.ShowAfterEffect();
+    }
+
     void Finish()
     {
         if (finished)
@@ -815,6 +833,7 @@ public class SuperCoolEffect : MonoBehaviour
         PetPhone.SetPhoneUiHidden(false);
         PetJourney.SetGalleryHidden(false);
         RestorePhoneIcon();
+        RestoreAdminPanel();
         StopLiveCamera();
         StopLiveMicrophone();
 
@@ -845,6 +864,7 @@ public class SuperCoolEffect : MonoBehaviour
         PetPhone.SetPhoneUiHidden(false);
         PetJourney.SetGalleryHidden(false);
         RestorePhoneIcon();
+        RestoreAdminPanel();
         StopLiveCamera();
         StopLiveMicrophone();
 

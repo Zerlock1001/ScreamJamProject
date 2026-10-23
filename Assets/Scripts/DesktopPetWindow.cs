@@ -43,6 +43,7 @@ public class DesktopPetWindow : MonoBehaviour
 
     const uint SwpNoSize = 0x0001;
     const uint SwpNoMove = 0x0002;
+    const uint SwpNoActivate = 0x0010;
     const uint SwpFrameChanged = 0x0020;
     const uint SwpShowWindow = 0x0040;
 
@@ -59,6 +60,7 @@ public class DesktopPetWindow : MonoBehaviour
 
     static readonly IntPtr HwndTopMost = new IntPtr(-1);
     static readonly IntPtr HwndNoTopMost = new IntPtr(-2);
+    static bool fullWindowRegionForced;
 
     Camera cam;
     Texture2D placeholderTexture;
@@ -108,6 +110,7 @@ public class DesktopPetWindow : MonoBehaviour
     Transform petDragTarget;
     Vector3 petDragLastWorld;
     bool ready;
+    bool startedForeground;
     Vector3 camPosition;
     Quaternion camRotation;
     float camOrthoSize;
@@ -146,6 +149,15 @@ public class DesktopPetWindow : MonoBehaviour
 #endif
     }
 
+    public static void SetFullWindowRegion(bool enabled)
+    {
+        fullWindowRegionForced = enabled;
+#if !UNITY_EDITOR
+        if (instance != null)
+            instance.regionDirty = true;
+#endif
+    }
+
     void Awake()
     {
         cam = GetComponent<Camera>();
@@ -162,6 +174,7 @@ public class DesktopPetWindow : MonoBehaviour
 
 #if !UNITY_EDITOR
         instance = this;
+        startedForeground = GetForegroundWindow() == ResolveWindow();
         StartCoroutine(SetupWindow());
 #endif
     }
@@ -233,6 +246,9 @@ public class DesktopPetWindow : MonoBehaviour
         if (petDragTarget == null)
             return true;
 
+        if (PetJourney.Instance != null)
+            PetJourney.Instance.NotifyFinalBodyDragged();
+
         petDragActive = true;
         dragging = true;
         petDragLastWorld = ScreenToWorldOnPetPlane(Input.mousePosition);
@@ -253,7 +269,10 @@ public class DesktopPetWindow : MonoBehaviour
         Vector3 delta = world - petDragLastWorld;
         if (delta.sqrMagnitude > 0f)
         {
-            petDragTarget.position += new Vector3(delta.x, delta.y, 0f);
+            float sensitivity = PetJourney.Instance != null && PetJourney.Instance.UsingFinalBody
+                ? 0.15f
+                : 1f;
+            petDragTarget.position += new Vector3(delta.x * sensitivity, delta.y * sensitivity, 0f);
             ClampPetToView();
         }
 
@@ -380,6 +399,9 @@ public class DesktopPetWindow : MonoBehaviour
 #if !UNITY_EDITOR
     IEnumerator SetupWindow()
     {
+        if (!startedForeground)
+            startedForeground = GetForegroundWindow() == ResolveWindow();
+
         Screen.fullScreenMode = FullScreenMode.Windowed;
         ComputeAdaptiveWindow(out int targetWidth, out int targetHeight, out _, out _);
         windowWidth = targetWidth;
@@ -406,11 +428,26 @@ public class DesktopPetWindow : MonoBehaviour
         ready = true;
         RememberLayout();
 
+        if (startedForeground)
+            RestoreForegroundFocus();
+
         for (int i = 0; i < 30; i++)
         {
             yield return null;
             TrackCurrentWindow();
         }
+
+        if (startedForeground && GetForegroundWindow() != hwnd)
+            RestoreForegroundFocus();
+    }
+
+    void RestoreForegroundFocus()
+    {
+        if (hwnd == IntPtr.Zero)
+            return;
+
+        SetForegroundWindow(hwnd);
+        SetFocus(hwnd);
     }
 
     void TrackCurrentWindow()
@@ -455,6 +492,7 @@ public class DesktopPetWindow : MonoBehaviour
         };
         DwmExtendFrameIntoClientArea(hwnd, ref margins);
 
+        bool hadFocus = placeOnScreen && GetForegroundWindow() == hwnd;
         if (placeOnScreen)
         {
             // Force the shell to refresh the taskbar button after applying the tool-window style.
@@ -465,7 +503,7 @@ public class DesktopPetWindow : MonoBehaviour
         IntPtr zOrder = alwaysOnTop ? HwndTopMost : HwndNoTopMost;
         if (!placeOnScreen)
         {
-            SetWindowPos(hwnd, zOrder, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpFrameChanged | SwpShowWindow);
+            SetWindowPos(hwnd, zOrder, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpNoActivate | SwpFrameChanged | SwpShowWindow);
             return;
         }
 
@@ -473,6 +511,8 @@ public class DesktopPetWindow : MonoBehaviour
         windowWidth = width;
         windowHeight = height;
         SetWindowPos(hwnd, zOrder, x, y, width, height, SwpFrameChanged | SwpShowWindow);
+        if (hadFocus)
+            RestoreForegroundFocus();
         RememberLayout();
     }
 
@@ -513,7 +553,7 @@ public class DesktopPetWindow : MonoBehaviour
             return;
 
         IntPtr zOrder = alwaysOnTop ? HwndTopMost : HwndNoTopMost;
-        SetWindowPos(hwnd, zOrder, x, y, newWidth, newHeight, SwpFrameChanged | SwpShowWindow);
+        SetWindowPos(hwnd, zOrder, x, y, newWidth, newHeight, SwpNoActivate | SwpFrameChanged | SwpShowWindow);
         windowWidth = newWidth;
         windowHeight = newHeight;
         regionDirty = true;
@@ -577,7 +617,7 @@ public class DesktopPetWindow : MonoBehaviour
             || current.bottom - current.top != height)
         {
             IntPtr zOrder = alwaysOnTop ? HwndTopMost : HwndNoTopMost;
-            SetWindowPos(hwnd, zOrder, x, y, width, height, SwpFrameChanged | SwpShowWindow);
+            SetWindowPos(hwnd, zOrder, x, y, width, height, SwpNoActivate | SwpFrameChanged | SwpShowWindow);
         }
 
         windowWidth = width;
@@ -633,7 +673,9 @@ public class DesktopPetWindow : MonoBehaviour
             exStyle &= ~WsExTransparent;
         SetWindowLong(target, GwlExStyle, exStyle);
         IntPtr zOrder = alwaysOnTop ? HwndTopMost : HwndNoTopMost;
-        SetWindowPos(target, zOrder, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpFrameChanged | SwpShowWindow);
+        // This runs whenever the cursor crosses a hit region. Activating here can
+        // move keyboard focus to a Unity child HWND and break an active InputField.
+        SetWindowPos(target, zOrder, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpNoActivate | SwpFrameChanged | SwpShowWindow);
         return true;
     }
 
@@ -1092,7 +1134,9 @@ public class DesktopPetWindow : MonoBehaviour
         if (!regionDirty && hash == appliedRegionHash)
             return;
 
-        bool keepFullWindow = dragging || (sampleSnapshot.Length > 0 && !spritesFullyMapped);
+        bool keepFullWindow = fullWindowRegionForced
+            || dragging
+            || (sampleSnapshot.Length > 0 && !spritesFullyMapped);
         var targets = regionTargets.Count > 0 ? regionTargets : new List<IntPtr> { hwnd };
         for (int i = 0; i < targets.Count; i++)
         {
@@ -1312,6 +1356,15 @@ public class DesktopPetWindow : MonoBehaviour
 
     [DllImport("user32.dll")]
     static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    static extern IntPtr SetFocus(IntPtr hWnd);
 
     [DllImport("user32.dll")]
     static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);

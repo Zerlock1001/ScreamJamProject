@@ -27,6 +27,7 @@ namespace ScreamJam.Debugging
         public static float CameraCaptureDelaySeconds = CameraCaptureService.DefaultCaptureDelaySeconds;
 
         private static DebugConsole _instance;
+        private static bool ConsoleAvailable => Application.isEditor;
         private static readonly ConcurrentQueue<LogEntry> Pending = new ConcurrentQueue<LogEntry>();
         private static readonly Dictionary<string, ConsoleCommand> Commands =
             new Dictionary<string, ConsoleCommand>(StringComparer.OrdinalIgnoreCase);
@@ -96,6 +97,7 @@ namespace ScreamJam.Debugging
             RegisterCommand("sayip", "/sayip", "Ask whether the player lives in their IP city.", _ => BeginSayIp());
             RegisterCommand("sweeper", "/sweeper [passcode|code]", "Open the daily minesweeper mini game, or print its admin passcode.", HandleSweeper);
             RegisterCommand("supercooleffect", "/supercooleffect", "Freeze the screen with a glitch grid effect.", _ => SuperCoolEffect.Trigger());
+            RegisterCommand("preview", "/preview 2", "Preview the admin access transition effect.", HandlePreview);
             RegisterCommand("quit", "/quit", "Quit the game.", _ => QuitGame());
             _open = false;
             _toggleUnlocked = false;
@@ -167,17 +169,22 @@ namespace ScreamJam.Debugging
 
         private void Update()
         {
-            ConsiderToggleUnlock();
-            if (!AllowToggle() && _open)
+            if (!ConsoleAvailable && _open)
                 CloseImmediate();
+
+            if (ConsoleAvailable)
+            {
+                ConsiderToggleUnlock();
+                if (!AllowToggle() && _open)
+                    CloseImmediate();
+            }
 
             UpdateUguiConsole();
 
             // KeyCode.BackQuote is the `~` key on a US keyboard layout.
-            // OnGUI also checks this key, because a focused text field can
-            // swallow the event in some situations. ToggleConsole de-dupes
-            // the two paths so one key press always means one toggle.
-            if (AllowToggle() && Input.GetKeyDown(KeyCode.BackQuote))
+            // The in-game console is a developer tool, so player builds do
+            // not register this shortcut at all.
+            if (ConsoleAvailable && AllowToggle() && Input.GetKeyDown(KeyCode.BackQuote))
                 ToggleConsole();
 
             if (_open)
@@ -252,6 +259,14 @@ namespace ScreamJam.Debugging
             _instance.SetOpen(false);
         }
 
+        public static void ClearCachedImages()
+        {
+            if (_instance == null)
+                return;
+
+            _instance.RemoveImageEntries();
+        }
+
         public static void CloseImmediate()
         {
             if (_instance == null)
@@ -288,6 +303,8 @@ namespace ScreamJam.Debugging
 
         private void SetOpen(bool open)
         {
+            if (open && !ConsoleAvailable)
+                return;
             if (_open == open) return;
 
             _open = open;
@@ -386,7 +403,8 @@ namespace ScreamJam.Debugging
                 return;
 
             // Catch `~` before the command text field can consume it.
-            if (AllowToggle() &&
+            if (ConsoleAvailable &&
+                AllowToggle() &&
                 Event.current.type == EventType.KeyDown &&
                 Event.current.keyCode == KeyCode.BackQuote)
             {
@@ -944,6 +962,18 @@ namespace ScreamJam.Debugging
             _scrollToBottom = true;
         }
 
+        private void HandlePreview(string[] args)
+        {
+            if (args == null || args.Length != 1 || args[0] != "2")
+            {
+                AddCommandLine("Usage: /preview 2", LogType.Warning);
+                return;
+            }
+
+            CloseImmediate();
+            AdminAccessEffect.Play(null);
+        }
+
         private void HandleSweeper(string[] args)
         {
             if (args == null || args.Length == 0)
@@ -958,7 +988,7 @@ namespace ScreamJam.Debugging
             {
                 if (!DailyMiniGame.HasGame)
                 {
-                    AddCommandLine("No active minesweeper board. Run /sweeper first.", LogType.Warning);
+                    AddCommandLine("click a grid first!", LogType.Warning);
                     return;
                 }
 
@@ -1094,7 +1124,11 @@ namespace ScreamJam.Debugging
         private void QuitGame()
         {
             AddCommandLine("Quitting...");
+            QuitApplication();
+        }
 
+        public static void QuitApplication()
+        {
 #if UNITY_EDITOR
             UnityEditor.EditorApplication.isPlaying = false;
 #else

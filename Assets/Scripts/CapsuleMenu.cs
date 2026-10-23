@@ -111,6 +111,15 @@ public class CapsuleMenu : MonoBehaviour
         if (!enableMenu)
             return;
 
+        if (PetDialogue.OpeningInteractionLocked)
+        {
+            if (menuVisible)
+                SetMenuVisible(false);
+            pressedCapsule = false;
+            pressedOption = -1;
+            return;
+        }
+
         if (cam == null)
             cam = Camera.main;
         bool bodyClickable = capsule != null && (capsule.enabled || hiddenBodyClickable);

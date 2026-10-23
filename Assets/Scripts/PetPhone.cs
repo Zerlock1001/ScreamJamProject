@@ -67,6 +67,7 @@ public class PetPhone : MonoBehaviour
 
     const float PhoneWidth = 380f;
     const float PhoneHeight = 560f;
+    const float PictureWindowScale = 1.5f;
     const float PhoneClosedScale = 0.88f;
     const float PhoneOpenSeconds = 0.24f;
     const float PhoneCloseSeconds = 0.18f;
@@ -1212,6 +1213,8 @@ public class PetPhone : MonoBehaviour
         drag.Phone = this;
         drag.Target = phoneIconRect;
 
+        phoneIcon.AddComponent<PhoneIconHover>();
+
         phoneIcon.transform.SetAsLastSibling();
     }
 
@@ -1657,8 +1660,6 @@ public class PetPhone : MonoBehaviour
                     color = buttonColor;
                 if (x >= 6 && x <= 9 && y >= 2 && y <= 3)
                     color = buttonColor;
-                if (x == width - 1 && y >= 9 && y <= 13)
-                    color = edge;
 
                 pixels[y * width + x] = color;
             }
@@ -1844,6 +1845,9 @@ public class PetPhone : MonoBehaviour
         window.anchorMax = new Vector2(0.5f, 0.5f);
         window.pivot = new Vector2(0.5f, 0.5f);
         window.sizeDelta = new Vector2(width * scale, height * scale);
+        window.localScale = Vector3.one * PictureWindowScale;
+        var drag = windowObject.AddComponent<WindowDrag>();
+        drag.Target = window;
         float shift = 26f * (pictureWindows % 8);
         pictureWindows++;
         window.anchoredPosition = new Vector2(shift, -shift);
@@ -1968,5 +1972,93 @@ public class PhoneIconDrag : MonoBehaviour, IPointerDownHandler, IPointerClickHa
         position.x = Mathf.Clamp(position.x, iconBounds.width - canvasBounds.width, 0f);
         position.y = Mathf.Clamp(position.y, 0f, canvasBounds.height - iconBounds.height);
         Target.anchoredPosition = position;
+    }
+}
+
+public class PhoneIconHover : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
+{
+    RectTransform target;
+    Image body;
+    Vector3 baseScale = Vector3.one;
+    Color baseColor = Color.white;
+    Coroutine hoverRoutine;
+    bool hovered;
+
+    void Awake()
+    {
+        target = transform as RectTransform;
+        body = GetComponent<Image>();
+        if (target != null)
+            baseScale = target.localScale;
+        if (body != null)
+            baseColor = body.color;
+    }
+
+    public void OnPointerEnter(PointerEventData eventData)
+    {
+        hovered = true;
+        StartHover();
+    }
+
+    public void OnPointerExit(PointerEventData eventData)
+    {
+        hovered = false;
+        StartHover();
+    }
+
+    void OnDisable()
+    {
+        if (hoverRoutine != null)
+        {
+            StopCoroutine(hoverRoutine);
+            hoverRoutine = null;
+        }
+
+        hovered = false;
+        ResetVisual();
+    }
+
+    void StartHover()
+    {
+        if (target == null || body == null)
+            return;
+
+        if (hoverRoutine != null)
+            StopCoroutine(hoverRoutine);
+        hoverRoutine = StartCoroutine(AnimateHover(hovered));
+    }
+
+    IEnumerator AnimateHover(bool enter)
+    {
+        Vector3 startScale = target.localScale;
+        Color startColor = body.color;
+        Vector3 endScale = baseScale * (enter ? 1.1f : 1f);
+        Color endColor = enter
+            ? new Color(baseColor.r * 1.1f, baseColor.g * 1.1f, baseColor.b * 1.1f, baseColor.a)
+            : baseColor;
+
+        const float duration = 0.12f;
+        float elapsed = 0f;
+        while (elapsed < duration)
+        {
+            elapsed += Time.unscaledDeltaTime;
+            float t = Mathf.Clamp01(elapsed / duration);
+            float eased = 1f - Mathf.Pow(1f - t, 3f);
+            target.localScale = Vector3.LerpUnclamped(startScale, endScale, eased);
+            body.color = Color.LerpUnclamped(startColor, endColor, eased);
+            yield return null;
+        }
+
+        target.localScale = endScale;
+        body.color = endColor;
+        hoverRoutine = null;
+    }
+
+    void ResetVisual()
+    {
+        if (target != null)
+            target.localScale = baseScale;
+        if (body != null)
+            body.color = baseColor;
     }
 }

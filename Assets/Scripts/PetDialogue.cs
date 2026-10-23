@@ -1,7 +1,9 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -26,6 +28,20 @@ public class PetDialogue : MonoBehaviour
     static readonly Color StateIIColor = new Color(0.20f, 0.24f, 0.40f, 1f);
     public const string Status2Pose = "Status2";
     const float PetVisualScale = 0.85f;
+    const float TypeSecondsPerCharacter = 0.035f;
+    const float NameEasterLineHoldSeconds = 1.5f;
+    const float Status2VoicePitchScale = 0.85f;
+    const float Status2VoiceSpeedScale = 0.85f;
+    const float ClipboardSpeechChance = 0.05f;
+    const int ClipboardSpeechMaxChars = 130;
+
+#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
+    const uint CfText = 1;
+    const uint CfUnicodeText = 13;
+
+    [DllImport("user32.dll")]
+    static extern bool IsClipboardFormatAvailable(uint format);
+#endif
 
     Camera cam;
     Font defaultFont;
@@ -36,6 +52,14 @@ public class PetDialogue : MonoBehaviour
     bool pressedBubble;
     bool playingIntro;
     int introIndex;
+    bool typing;
+    string typeFullText;
+    string typeDisplayedText;
+    Coroutine typeRoutine;
+    AudioSource voiceSource;
+    AudioClip voiceBlip;
+    float clipboardCheckAt;
+    bool clipboardSpeechTriggered;
     enum OpeningBeat
     {
         None,
@@ -75,6 +99,12 @@ public class PetDialogue : MonoBehaviour
     Coroutine namePromptAppearRoutine;
     Transform petRoot;
     bool namePromptBusy;
+    bool namePromptClearing;
+    bool namePromptTransitioning;
+    bool openingArrivalLocked;
+    int blinkyNameAttempts;
+    Coroutine nameClearRoutine;
+    Coroutine nameAcceptRoutine;
     static Sprite promptPanelSprite;
     Transform headBubble;
     Transform speechAnchor;
@@ -86,10 +116,15 @@ public class PetDialogue : MonoBehaviour
     public static string PlayerName { get; private set; }
     public static bool HasPlayerName => !string.IsNullOrEmpty(PlayerName);
     public static bool OpeningComplete { get; private set; }
+    public static bool OpeningInteractionLocked =>
+        Instance != null && Instance.openingArrivalLocked;
     public bool IsOpen => visible;
     public Transform PetRoot => petRoot;
-    public bool CanDragPet => petRoot != null && OpeningComplete && !namePromptBusy && !PetJourney.PetIsAway
-        && (PetJourney.Instance == null || !PetJourney.Instance.UsingFinalBody);
+    public bool CanDragPet => petRoot != null
+        && OpeningComplete
+        && !openingArrivalLocked
+        && !namePromptBusy
+        && !PetJourney.PetIsAway;
 
     public void FollowBody(Transform body)
     {
@@ -242,6 +277,21 @@ public class PetDialogue : MonoBehaviour
     {
         if (namePrompt != null)
             Destroy(namePrompt);
+
+        if (nameAcceptRoutine != null)
+        {
+            StopCoroutine(nameAcceptRoutine);
+            nameAcceptRoutine = null;
+        }
+
+        if (typeRoutine != null)
+        {
+            StopCoroutine(typeRoutine);
+            typeRoutine = null;
+        }
+
+        if (voiceBlip != null)
+            Destroy(voiceBlip);
 
         if (Instance == this)
         {
@@ -434,15 +484,89 @@ public class PetDialogue : MonoBehaviour
         }
 
         Transform anchor = speechAnchor != null ? speechAnchor : transform;
-        Vector3 pos = anchor.position + Vector3.Scale(headLocalOffset, transform.lossyScale);
+        Vector3 pos;
+        if (TryPlaceFinalBodyBubble(anchor, out Vector3 finalPos))
+        {
+            pos = finalPos;
+        }
+        else
+        {
+            pos = anchor.position + Vector3.Scale(headLocalOffset, transform.lossyScale);
+            SpriteRenderer bubbleRenderer = headBubble.GetComponent<SpriteRenderer>();
+            if (bubbleRenderer != null)
+                bubbleRenderer.flipX = false;
+        }
+
         if (Time.unscaledTime < nudgeUntil)
             pos.x += Mathf.Sin(Time.unscaledTime * 42f) * 0.22f;
         headBubble.position = pos;
         headBubble.rotation = Quaternion.identity;
     }
 
+    bool TryPlaceFinalBodyBubble(Transform anchor, out Vector3 position)
+    {
+        position = Vector3.zero;
+        if (PetJourney.Instance == null || !PetJourney.Instance.UsingFinalBody || anchor == null)
+            return false;
+
+        SpriteRenderer body = anchor.GetComponent<SpriteRenderer>();
+        if (body == null)
+            body = anchor.GetComponentInChildren<SpriteRenderer>(true);
+        SpriteRenderer bubble = headBubble != null ? headBubble.GetComponent<SpriteRenderer>() : null;
+        if (body == null || bubble == null || !body.enabled || !bubble.enabled)
+            return false;
+        if (!body.gameObject.activeInHierarchy || !bubble.gameObject.activeInHierarchy)
+            return false;
+
+        Camera viewCamera = cam != null ? cam : Camera.main;
+        if (viewCamera == null)
+            return false;
+
+        Bounds bodyBounds = body.bounds;
+        Bounds bubbleBounds = bubble.bounds;
+        float depth = Mathf.Abs(viewCamera.transform.position.z - bodyBounds.center.z);
+        Vector3 bottomLeft = viewCamera.ViewportToWorldPoint(new Vector3(0f, 0f, depth));
+        Vector3 topRight = viewCamera.ViewportToWorldPoint(new Vector3(1f, 1f, depth));
+
+        float halfWidth = bubbleBounds.extents.x;
+        float halfHeight = bubbleBounds.extents.y;
+        const float gap = 0.28f;
+        const float margin = 0.08f;
+
+        float leftX = bodyBounds.min.x - gap - halfWidth;
+        float rightX = bodyBounds.max.x + gap + halfWidth;
+        float minX = bottomLeft.x + halfWidth + margin;
+        float maxX = topRight.x - halfWidth - margin;
+        bool leftFits = leftX >= minX;
+        bool rightFits = rightX <= maxX;
+
+        float viewCenterX = (bottomLeft.x + topRight.x) * 0.5f;
+        bool placeLeft = bodyBounds.center.x >= viewCenterX - 0.05f;
+        if (placeLeft && !leftFits && rightFits)
+            placeLeft = false;
+        else if (!placeLeft && !rightFits && leftFits)
+            placeLeft = true;
+
+        bubble.flipX = !placeLeft;
+
+        float x = Mathf.Clamp(placeLeft ? leftX : rightX, minX, maxX);
+        float lift = Mathf.Max(0.25f, bodyBounds.extents.y * 0.15f);
+        float y = Mathf.Clamp(
+            bodyBounds.center.y + lift,
+            bottomLeft.y + halfHeight + margin,
+            topRight.y - halfHeight - margin);
+        Vector3 targetCenter = new Vector3(x, y, anchor.position.z);
+        position = headBubble.position + (targetCenter - bubbleBounds.center);
+        return true;
+    }
+
     void Update()
     {
+        UpdateClipboardSpeech();
+
+        if (namePromptTransitioning || openingArrivalLocked)
+            return;
+
         if (!visible || cam == null)
             return;
 
@@ -476,6 +600,12 @@ public class PetDialogue : MonoBehaviour
 
         if (!wasBubble)
             return;
+
+        if (typing)
+        {
+            CompleteTyping();
+            return;
+        }
 
         AdvanceIntroOrHide();
     }
@@ -603,6 +733,93 @@ public class PetDialogue : MonoBehaviour
         Hide();
     }
 
+    static bool HasClipboardText()
+    {
+#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
+        return IsClipboardFormatAvailable(CfUnicodeText)
+            || IsClipboardFormatAvailable(CfText);
+#else
+        return !string.IsNullOrEmpty(GUIUtility.systemCopyBuffer);
+#endif
+    }
+
+    void UpdateClipboardSpeech()
+    {
+        if (PetStory.Current != PetStory.Phase.StateII || clipboardSpeechTriggered)
+            return;
+
+        if (clipboardCheckAt <= 0f)
+            clipboardCheckAt = Time.unscaledTime + 1f;
+        if (Time.unscaledTime < clipboardCheckAt)
+            return;
+
+        clipboardCheckAt = Time.unscaledTime + 1f;
+
+        if (visible
+            || namePromptBusy
+            || !HasPlayerName
+            || PetJourney.PetIsAway
+            || AdminPanel.IsOpen)
+            return;
+
+        if (UnityEngine.Random.value >= ClipboardSpeechChance)
+            return;
+
+        if (!HasClipboardText())
+            return;
+
+        string text;
+        try
+        {
+            text = GUIUtility.systemCopyBuffer;
+        }
+        catch
+        {
+            return;
+        }
+
+        if (string.IsNullOrEmpty(text))
+            return;
+
+        var cleaned = new StringBuilder(ClipboardSpeechMaxChars + 1);
+        bool pendingSpace = false;
+        for (int i = 0; i < text.Length; i++)
+        {
+            char c = text[i];
+            if (char.IsWhiteSpace(c))
+            {
+                if (cleaned.Length > 0)
+                    pendingSpace = true;
+                continue;
+            }
+
+            if (pendingSpace)
+            {
+                cleaned.Append(' ');
+                pendingSpace = false;
+            }
+
+            cleaned.Append(c);
+            if (cleaned.Length > ClipboardSpeechMaxChars)
+                break;
+        }
+
+        text = cleaned.ToString();
+        if (text.Length == 0)
+            return;
+
+        if (text.Length > ClipboardSpeechMaxChars)
+        {
+            int cut = ClipboardSpeechMaxChars;
+            if (char.IsHighSurrogate(text[cut - 1]))
+                cut--;
+            text = text.Substring(0, cut) + "…";
+        }
+
+        clipboardSpeechTriggered = true;
+        Say(text);
+    }
+
     string IntroText(int index)
     {
         if (introLines == null || index < 0 || index >= introLines.Length)
@@ -642,6 +859,11 @@ public class PetDialogue : MonoBehaviour
     void ShowNamePrompt()
     {
         namePromptBusy = true;
+        namePromptClearing = false;
+        namePromptTransitioning = false;
+        blinkyNameAttempts = 0;
+        nameClearRoutine = null;
+        nameAcceptRoutine = null;
         namePromptHomePosition = petRoot != null ? petRoot.localPosition : Vector3.zero;
 
         Canvas canvas = OverlayCanvas();
@@ -1050,14 +1272,156 @@ public class PetDialogue : MonoBehaviour
         nameInput.ActivateInputField();
     }
 
+    IEnumerator ClearNameInputOneCharacterAtATime()
+    {
+        if (nameInput != null)
+            nameInput.DeactivateInputField();
+
+        while (nameInput != null && !string.IsNullOrEmpty(nameInput.text))
+        {
+            nameInput.text = nameInput.text.Substring(0, nameInput.text.Length - 1);
+            yield return new WaitForSecondsRealtime(0.07f);
+        }
+
+        namePromptClearing = false;
+        nameClearRoutine = null;
+
+        if (nameInput != null && namePrompt != null)
+        {
+            nameInput.readOnly = false;
+            if (EventSystem.current != null)
+                EventSystem.current.SetSelectedGameObject(nameInput.gameObject);
+            nameInput.ActivateInputField();
+        }
+    }
+
     void FinishNamePrompt(string raw)
     {
-        if (HasPlayerName)
+        if (HasPlayerName || namePromptClearing || namePromptTransitioning)
             return;
 
         string name = string.IsNullOrWhiteSpace(raw) ? string.Empty : raw.Trim();
         if (string.IsNullOrEmpty(name))
             return;
+
+        string matchKey = NameMatchKey(name);
+        if (IsNameMatch(matchKey, "lmy", "李明育", "Rebbeca Li"))
+        {
+            BeginNameLine(name, "这个游戏捂了眼眼的好玩");
+            return;
+        }
+
+        if (IsNameMatch(matchKey, "maoyuwei", "zhoujin", "jhin"))
+        {
+            BeginNameLine(name, "Here we go again");
+            return;
+        }
+
+        if (IsNameMatch(matchKey, "Rong Su", "Su Rong", "苏荣", "苏容", "苏蓉"))
+        {
+            BeginNameRejectLine("That is not your name");
+            return;
+        }
+
+        if (string.Equals(name, "blinky", StringComparison.OrdinalIgnoreCase))
+        {
+            blinkyNameAttempts++;
+            BeginNameRejectLine(blinkyNameAttempts > 2
+                ? "I said that is my name."
+                : "That is my name.");
+            return;
+        }
+
+        AcceptName(name);
+    }
+
+    static string NameMatchKey(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return string.Empty;
+
+        var builder = new StringBuilder(name.Length);
+        for (int i = 0; i < name.Length; i++)
+        {
+            if (!char.IsWhiteSpace(name[i]))
+                builder.Append(name[i]);
+        }
+        return builder.ToString();
+    }
+
+    static bool IsNameMatch(string name, params string[] candidates)
+    {
+        for (int i = 0; i < candidates.Length; i++)
+        {
+            if (string.Equals(name, NameMatchKey(candidates[i]), StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
+
+    void BeginNameLine(string name, string line)
+    {
+        BeginNameExtraLine(line, () => AcceptName(name));
+    }
+
+    void BeginNameRejectLine(string line)
+    {
+        BeginNameExtraLine(line, BeginNameRejectAfterLine);
+    }
+
+    void BeginNameExtraLine(string line, Action afterLine)
+    {
+        namePromptTransitioning = true;
+
+        if (nameInput != null)
+        {
+            nameInput.DeactivateInputField();
+            nameInput.readOnly = true;
+        }
+
+        Show(line);
+
+        if (nameAcceptRoutine != null)
+            StopCoroutine(nameAcceptRoutine);
+        nameAcceptRoutine = StartCoroutine(WaitThenNameExtraLine(afterLine));
+    }
+
+    IEnumerator WaitThenNameExtraLine(Action afterLine)
+    {
+        float started = Time.unscaledTime;
+        while (typing && Time.unscaledTime - started < 4f)
+            yield return null;
+
+        yield return new WaitForSecondsRealtime(NameEasterLineHoldSeconds);
+
+        Hide();
+        namePromptTransitioning = false;
+        nameAcceptRoutine = null;
+        afterLine?.Invoke();
+    }
+
+    void BeginNameRejectAfterLine()
+    {
+        if (nameInput == null || namePrompt == null)
+            return;
+
+        if (nameClearRoutine != null)
+            StopCoroutine(nameClearRoutine);
+
+        namePromptClearing = true;
+        nameClearRoutine = StartCoroutine(ClearNameInputOneCharacterAtATime());
+    }
+
+    void AcceptName(string name)
+    {
+        if (nameClearRoutine != null)
+        {
+            StopCoroutine(nameClearRoutine);
+            nameClearRoutine = null;
+        }
+        namePromptClearing = false;
+        namePromptTransitioning = false;
 
         PlayerName = name;
         bool continued = resumeAfterName;
@@ -1148,10 +1512,15 @@ public class PetDialogue : MonoBehaviour
 
     IEnumerator MoveToCorner()
     {
+        openingArrivalLocked = true;
         yield return StartCoroutine(PlayClipAndWait("Enter"));
+
+        // Snap to the corner even if an animator transition ended early.
+        transform.localPosition = new Vector3(6.6f, -3f, 0f);
         transform.localRotation = Quaternion.identity;
         OpeningComplete = true;
         SetOpening(OpeningBeat.Stay);
+        openingArrivalLocked = false;
         Show("I think I'll just stay here.");
     }
 
@@ -1283,6 +1652,9 @@ public class PetDialogue : MonoBehaviour
 
     void PlayPose(string stateName)
     {
+        if (openingArrivalLocked)
+            return;
+
         var animator = GetComponent<Animator>();
         if (animator == null || animator.runtimeAnimatorController == null)
             return;
@@ -1309,10 +1681,15 @@ public class PetDialogue : MonoBehaviour
 
     public void Show(string text)
     {
+        if (openingArrivalLocked)
+            return;
+
+        StopTyping();
         currentLine = string.IsNullOrEmpty(text) ? "……" : text;
         PlaceDialogue(currentLine);
         visible = true;
         PlayPose("Talking");
+        BeginTyping(PetStory.ApplyName(currentLine));
     }
 
     public void RefreshPlacement()
@@ -1335,7 +1712,7 @@ public class PetDialogue : MonoBehaviour
         dialogueText.resizeTextForBestFit = !emphasis;
         if (emphasis)
             dialogueText.fontSize = 32;
-        dialogueText.text = PetStory.ApplyName(content);
+        dialogueText.text = typing ? typeDisplayedText : PetStory.ApplyName(content);
         if (!choiceOpen)
             SetChoicesVisible(false);
         if (headBubble != null)
@@ -1345,8 +1722,153 @@ public class PetDialogue : MonoBehaviour
         AssignDialogueCamera();
     }
 
+    void BeginTyping(string text)
+    {
+        StopTyping();
+        typeFullText = string.IsNullOrEmpty(text) ? "……" : text;
+        typeDisplayedText = string.Empty;
+        if (dialogueText == null)
+            return;
+
+        typing = true;
+        dialogueText.text = string.Empty;
+        typeRoutine = StartCoroutine(TypeDialogue());
+    }
+
+    IEnumerator TypeDialogue()
+    {
+        List<string> chunks = BuildTypeChunks(typeFullText);
+        var builder = new StringBuilder();
+        int visibleCharacters = 0;
+
+        for (int i = 0; i < chunks.Count; i++)
+        {
+            string chunk = chunks[i];
+            builder.Append(chunk);
+            if (IsRichTextTag(chunk))
+                continue;
+
+            visibleCharacters++;
+            typeDisplayedText = builder.ToString();
+            if (dialogueText != null)
+                dialogueText.text = typeDisplayedText;
+            if ((visibleCharacters & 1) == 0 && PetStory.Current != PetStory.Phase.StateIII)
+                PlayVoiceBlip();
+
+            float interval = PetStory.Current == PetStory.Phase.StateII
+                ? TypeSecondsPerCharacter / Status2VoiceSpeedScale
+                : TypeSecondsPerCharacter;
+            yield return new WaitForSecondsRealtime(interval);
+        }
+
+        typeDisplayedText = typeFullText;
+        if (dialogueText != null)
+            dialogueText.text = typeFullText;
+        typing = false;
+        typeRoutine = null;
+    }
+
+    static List<string> BuildTypeChunks(string text)
+    {
+        var chunks = new List<string>();
+        if (string.IsNullOrEmpty(text))
+            return chunks;
+
+        for (int i = 0; i < text.Length;)
+        {
+            if (text[i] == '<')
+            {
+                int end = text.IndexOf('>', i + 1);
+                if (end >= 0)
+                {
+                    chunks.Add(text.Substring(i, end - i + 1));
+                    i = end + 1;
+                    continue;
+                }
+            }
+
+            if (char.IsHighSurrogate(text[i]) && i + 1 < text.Length)
+            {
+                chunks.Add(text.Substring(i, 2));
+                i += 2;
+                continue;
+            }
+
+            chunks.Add(text[i].ToString());
+            i++;
+        }
+
+        return chunks;
+    }
+
+    static bool IsRichTextTag(string chunk)
+    {
+        return chunk != null
+            && chunk.Length >= 2
+            && chunk[0] == '<'
+            && chunk[chunk.Length - 1] == '>';
+    }
+
+    void CompleteTyping()
+    {
+        if (typeRoutine != null)
+        {
+            StopCoroutine(typeRoutine);
+            typeRoutine = null;
+        }
+
+        typing = false;
+        typeDisplayedText = typeFullText;
+        if (dialogueText != null)
+            dialogueText.text = typeFullText;
+    }
+
+    void StopTyping()
+    {
+        if (typeRoutine != null)
+        {
+            StopCoroutine(typeRoutine);
+            typeRoutine = null;
+        }
+
+        typing = false;
+        typeDisplayedText = string.Empty;
+    }
+
+    void PlayVoiceBlip()
+    {
+        if (voiceSource == null)
+        {
+            voiceSource = gameObject.AddComponent<AudioSource>();
+            voiceSource.playOnAwake = false;
+            voiceSource.spatialBlend = 0f;
+
+            const int sampleRate = 44100;
+            int count = Mathf.CeilToInt(sampleRate * 0.028f);
+            voiceBlip = AudioClip.Create("BlinkyTalkBlip", count, 1, sampleRate, false);
+            var samples = new float[count];
+            for (int i = 0; i < count; i++)
+            {
+                float t = i / (float)sampleRate;
+                float envelope = 1f - i / (float)count;
+                samples[i] = Mathf.Sin(2f * Mathf.PI * 880f * t) * 0.22f * envelope;
+            }
+            voiceBlip.SetData(samples, 0);
+        }
+
+        if (voiceBlip != null)
+        {
+            float pitch = UnityEngine.Random.Range(0.96f, 1.04f);
+            if (PetStory.Current == PetStory.Phase.StateII)
+                pitch *= Status2VoicePitchScale;
+            voiceSource.pitch = pitch;
+            voiceSource.PlayOneShot(voiceBlip, 0.22f);
+        }
+    }
+
     public void Hide()
     {
+        StopTyping();
         bool wasVisible = visible;
         visible = false;
         pressedBubble = false;

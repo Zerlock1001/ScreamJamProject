@@ -30,6 +30,10 @@ public class PetJourney : MonoBehaviour
     const string PhaseKey = "PetStory.Phase";
     const string IntroducedKey = "PetCampaign.Introduced";
     const string OfferKey = "PetCampaign.OfferUnlocked";
+    const string LoudAudioReadyKey = "PetJourney.LoudAudioReady";
+    const float JourneyMicWindowSeconds = 20f;
+    const float JourneyMicSampleSeconds = 0.1f;
+    const float JourneyMicMinRms = 1e-5f;
 
     [SerializeField] SpriteRenderer pet;
     [SerializeField] Button journeyButton;
@@ -76,6 +80,7 @@ public class PetJourney : MonoBehaviour
     bool bodyExpected;
     bool finalForm;
     bool finalBodyShown = true;
+    bool finalBodyManualPosition;
     SpriteRenderer finalBody;
     SpriteRenderer[] finalParts;
     Transform redEye;
@@ -106,15 +111,22 @@ public class PetJourney : MonoBehaviour
     bool thirdPlaceReady;
     int thirdPlaceToken;
     Coroutine moodShake;
+    Coroutine moodScaleRoutine;
     RectTransform moodWidget;
     Vector2 moodRestPosition;
     bool moodRestCached;
     bool moodBarSuppressed;
+    bool moodClosing;
+    float moodScaleFactor = 1f;
+    float moodBaseScale = 1f;
     long returnAtTicks;
     long moodReadyAtTicks;
     float returnSecondsLeft = -1f;
     bool returnCountdownArmed;
     Coroutine postcardRoutine;
+    Coroutine journeyMicMonitorRoutine;
+    bool journeyMicMonitorStarted;
+    bool journeyMicLoudReady;
     Sprite[] memeSprites;
     Button galleryButton;
     GameObject galleryPanel;
@@ -149,10 +161,20 @@ public class PetJourney : MonoBehaviour
         DebugConsole.RegisterCommand("skip", "/skip", "End the current journey and bring Blinky back now.", _ => SkipJourney());
         DebugConsole.RegisterCommand("skipto", "/skipto X", "Set the number of completed journeys to X.", SkipToCommand);
         DebugConsole.RegisterCommand("recover", "/recover mood", "Fill the mood bar immediately.", RecoverMoodCommand);
-        DebugConsole.RegisterCommand("remake", "/remake", "Erase the save and start the game over.", _ => Remake());
+        DebugConsole.RegisterCommand("remake", "/remake", "Erase the save and start the game over.", _ => Remake(false));
+        DebugConsole.RegisterCommand("remake2", "/remake2", "Erase the save and generated files, then quit.", _ => Remake(true));
         DebugConsole.RegisterCommand("sendpics", "/sendpics", "Send 10 random postcards and memes to the phone for testing.", _ => SendTestPictures());
 
         tripCount = LoadInt(TripCountKey);
+        if (PlayerPrefs.GetInt(LoudAudioReadyKey, 0) != 0)
+        {
+            journeyMicLoudReady = System.IO.File.Exists(MicrophoneLevelService.RecordingPath);
+            if (!journeyMicLoudReady)
+            {
+                PlayerPrefs.DeleteKey(LoudAudioReadyKey);
+                PlayerPrefs.Save();
+            }
+        }
         returnAtTicks = LoadTicks(ReturnAtKey);
         moodReadyAtTicks = LoadTicks(MoodReadyKey);
         newsShown = LoadInt(NewsSeenKey) != 0;
@@ -203,6 +225,8 @@ public class PetJourney : MonoBehaviour
         if (!away && tripCount == 1 && PetCampaign.Ensure().HasIntroduced)
             BeginRestNag();
 
+        EnsureJourneyMicMonitor();
+
         if (!away)
         {
             DebugConsole.CloseImmediate();
@@ -222,6 +246,7 @@ public class PetJourney : MonoBehaviour
 
     void OnDestroy()
     {
+        StopJourneyMicMonitor(!journeyMicLoudReady);
         if (Instance == this)
             Instance = null;
     }
@@ -388,14 +413,85 @@ public class PetJourney : MonoBehaviour
         DebugConsole.WriteLine("Mood restored.");
     }
 
-    static void Remake()
+    static void Remake(bool quitAfter)
     {
+        if (Instance != null)
+            Instance.StopJourneyMicMonitor(true);
+
+        MicrophoneLevelService microphone = MicrophoneLevelService.Instance;
+        if (microphone != null)
+        {
+            microphone.StopLivePlayback();
+            microphone.StopMicStartEvent();
+        }
+
         EraseSave();
         PetDialogue.ClearSession();
         PetStory.SetPhase(PetStory.Phase.Normal);
         EraseSave();
-        DebugConsole.WriteLine("Save erased. Starting over.");
+        EraseGeneratedContent();
+        DebugConsole.ClearCachedImages();
+
+        if (quitAfter)
+        {
+            DebugConsole.WriteLine("Developer reset complete. Quitting.");
+            DebugConsole.QuitApplication();
+            return;
+        }
+
+        DebugConsole.WriteLine("Developer reset complete. Starting over.");
         SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+    }
+
+    static void EraseGeneratedContent()
+    {
+        DeleteFileQuiet(PlayerPhotoFile);
+        DeleteFileQuiet(Path.Combine(
+            Application.persistentDataPath,
+            "TrueBlinkyMembership.html"));
+        DeleteFileQuiet(Path.Combine(
+            Application.persistentDataPath,
+            "TrueBlinky.ico"));
+
+        DeleteDirectoryQuiet(Path.Combine(Application.persistentDataPath, "Photos"));
+        DeleteDirectoryQuiet(Path.Combine(Application.persistentDataPath, "Screenshots"));
+        DeleteDirectoryQuiet(Path.Combine(Application.persistentDataPath, "Recordings"));
+
+        string desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        if (string.IsNullOrEmpty(desktop))
+            return;
+
+        DeleteDirectoryQuiet(Path.Combine(desktop, "Collections"));
+        DeleteFileQuiet(Path.Combine(desktop, "True Blinky.lnk"));
+        DeleteFileQuiet(Path.Combine(desktop, "DoNotClickThis.lnk"));
+        DeleteFileQuiet(Path.Combine(desktop, "blinky.txt"));
+        DeleteFileQuiet(Path.Combine(desktop, "blinky-note.txt"));
+    }
+
+    static void DeleteFileQuiet(string path)
+    {
+        try
+        {
+            if (!string.IsNullOrEmpty(path) && File.Exists(path))
+                File.Delete(path);
+        }
+        catch (Exception ex)
+        {
+            DebugConsole.WriteLine("Developer reset warning: " + ex.Message);
+        }
+    }
+
+    static void DeleteDirectoryQuiet(string path)
+    {
+        try
+        {
+            if (!string.IsNullOrEmpty(path) && Directory.Exists(path))
+                Directory.Delete(path, true);
+        }
+        catch (Exception ex)
+        {
+            DebugConsole.WriteLine("Developer reset warning: " + ex.Message);
+        }
     }
 
     public static void EraseSave()
@@ -421,10 +517,13 @@ public class PetJourney : MonoBehaviour
         PlayerPrefs.DeleteKey("PetCampaign.MemberId");
         PlayerPrefs.DeleteKey("DailyMiniGame.CompletedState");
         PlayerPrefs.DeleteKey("AdminPanel.ColorSequence");
+        PlayerPrefs.DeleteKey(LoudAudioReadyKey);
         AdminPanel.ClearCachedSequence();
         PlayerPrefs.DeleteKey("PetStory.ComputerName");
         PlayerPrefs.DeleteKey("PetDialogue.IntroSeen");
         PlayerPrefs.Save();
+        if (MicrophoneLevelService.Instance != null)
+            MicrophoneLevelService.Instance.ClearRecordingCache();
     }
 
     public void RecoverMood()
@@ -470,6 +569,7 @@ public class PetJourney : MonoBehaviour
             if (finalBody == null && finalParts != null && finalParts.Length > 0)
                 finalBody = finalParts[0];
             finalForm = true;
+            finalBodyManualPosition = false;
             finalBodyShown = !away && !departing;
             BindRedEye(found.transform);
             CapsuleMenu.RetainHiddenClick(pet, finalParts);
@@ -480,6 +580,42 @@ public class PetJourney : MonoBehaviour
         if (pet != null)
             pet.enabled = false;
         SetFinalParts(finalBodyShown);
+        CenterFinalBody();
+    }
+
+    public void NotifyFinalBodyDragged()
+    {
+        if (finalForm)
+            finalBodyManualPosition = true;
+    }
+
+    void CenterFinalBody()
+    {
+        if (!finalForm || finalBodyManualPosition || !finalBodyShown || finalBody == null || !finalBody.enabled)
+            return;
+
+        Camera cam = Camera.main;
+        if (cam == null)
+            return;
+
+        Bounds bounds = finalBody.bounds;
+        Vector3 target = cam.ViewportToWorldPoint(new Vector3(
+            0.5f,
+            0.5f,
+            Mathf.Abs(cam.transform.position.z - bounds.center.z)));
+        target.z = bounds.center.z;
+
+        Vector3 delta = target - bounds.center;
+        if (delta.sqrMagnitude < 0.000001f)
+            return;
+
+        Transform root = PetDialogue.Instance != null
+            ? PetDialogue.Instance.PetRoot
+            : transform.parent;
+        if (root == null)
+            root = transform;
+
+        root.position += new Vector3(delta.x, delta.y, 0f);
     }
 
     void SetFinalChildActive(bool active)
@@ -611,21 +747,33 @@ public class PetJourney : MonoBehaviour
     {
     }
 
-    public static void SetMoodBarVisible(bool visible)
+    public static void SetMoodBarVisible(bool visible, bool instant = false)
     {
         if (Instance == null)
             return;
 
         Instance.moodBarSuppressed = !visible;
-        if (!visible)
+        if (!visible && instant)
         {
-            if (Instance.moodWidget != null)
-                Instance.moodWidget.gameObject.SetActive(false);
+            Instance.HideMoodBarInstant();
+            return;
         }
-        else
+
+        Instance.PlaceMoodWidget();
+    }
+
+    void HideMoodBarInstant()
+    {
+        if (moodScaleRoutine != null)
         {
-            Instance.PlaceMoodWidget();
+            StopCoroutine(moodScaleRoutine);
+            moodScaleRoutine = null;
         }
+
+        moodClosing = false;
+        moodScaleFactor = 0f;
+        if (moodWidget != null)
+            moodWidget.gameObject.SetActive(false);
     }
 
     public static void SetGalleryHidden(bool hidden)
@@ -963,6 +1111,7 @@ public class PetJourney : MonoBehaviour
         {
             if (finalBodyShown && finalBody != null && !finalBody.enabled)
                 SetFinalParts(true);
+            CenterFinalBody();
             return;
         }
 
@@ -1011,6 +1160,11 @@ public class PetJourney : MonoBehaviour
 
     IEnumerator SendPostcards(float duration)
     {
+        if (tripCount == 2)
+            EnsureJourneyMicMonitor();
+        else if (tripCount == 5)
+            StopJourneyMicMonitor(!journeyMicLoudReady);
+
         if (tripCount == 3 && !PetCampaign.Ensure().PlaysSecondScript(tripCount))
         {
             yield return SendThirdJourney(duration);
@@ -1300,7 +1454,7 @@ public class PetJourney : MonoBehaviour
 
     IEnumerator SendFifthJourney(float duration)
     {
-        bool mic = TryStartFifthRecording();
+        bool mic = PrepareFifthAudio();
         float started = Time.unscaledTime;
         yield return null;
         while (away && departing)
@@ -1319,7 +1473,7 @@ public class PetJourney : MonoBehaviour
                 "Maybe you could try to flesh out what I can do a little more.",
                 "Maybe there are some other friends in my forum?",
                 "My phone's network is acting up. I left you a message on the desktop.",
-                "Maybe you'd be interested in this conversation."
+                "Maybe you'd be interested in this audio."
             };
             noteAt = 2;
             audioAt = 3;
@@ -1360,25 +1514,207 @@ public class PetJourney : MonoBehaviour
         }
     }
 
-    static bool TryStartFifthRecording()
+    bool PrepareFifthAudio()
     {
-        string[] devices;
-        try
-        {
-            devices = Microphone.devices;
-        }
-        catch (Exception)
-        {
-            return false;
-        }
-
-        if (devices == null || devices.Length == 0)
-            return false;
-
         MicrophoneLevelService service = MicrophoneLevelService.Instance;
-        if (service != null && service.IsRunning && !service.IsRecording)
-            service.StartRecording(10f);
-        return true;
+        bool useLoudSegment = journeyMicLoudReady
+            && service != null
+            && service.HasRecording;
+
+        StopJourneyMicMonitor(!useLoudSegment);
+
+        if (useLoudSegment)
+            return true;
+
+        if (journeyMicLoudReady)
+        {
+            journeyMicLoudReady = false;
+            PlayerPrefs.DeleteKey(LoudAudioReadyKey);
+            PlayerPrefs.Save();
+        }
+
+        return TryStartFifthRecording(service);
+    }
+
+    static bool TryStartFifthRecording(MicrophoneLevelService service)
+    {
+        if (service == null || !service.IsRunning || service.IsRecording)
+            return false;
+
+        return service.StartRecording(10f);
+    }
+
+    void EnsureJourneyMicMonitor()
+    {
+        if (journeyMicMonitorStarted || journeyMicLoudReady)
+            return;
+        if (tripCount < 2 || tripCount >= 5)
+            return;
+        if (MicrophoneLevelService.Instance == null)
+            return;
+
+        journeyMicMonitorStarted = true;
+        journeyMicMonitorRoutine = StartCoroutine(JourneyMicMonitor());
+    }
+
+    void StopJourneyMicMonitor(bool discardUnfinishedRecording)
+    {
+        if (journeyMicMonitorRoutine != null)
+        {
+            StopCoroutine(journeyMicMonitorRoutine);
+            journeyMicMonitorRoutine = null;
+        }
+
+        if (discardUnfinishedRecording
+            && !journeyMicLoudReady
+            && MicrophoneLevelService.Instance != null)
+        {
+            MicrophoneLevelService.Instance.ClearRecordingCache();
+        }
+    }
+
+    IEnumerator JourneyMicMonitor()
+    {
+        MicrophoneLevelService service = MicrophoneLevelService.Instance;
+        if (service == null)
+        {
+            journeyMicMonitorRoutine = null;
+            yield break;
+        }
+
+        while (!service.IsRunning || !service.HasSample)
+        {
+            if (journeyMicLoudReady || tripCount >= 5)
+            {
+                journeyMicMonitorRoutine = null;
+                yield break;
+            }
+            yield return new WaitForSecondsRealtime(0.5f);
+        }
+
+        float baselineStart = Time.unscaledTime;
+        double baselineSum = 0;
+        int baselineSamples = 0;
+        while (Time.unscaledTime - baselineStart < MicrophoneLevelService.MicStartBaselineSeconds)
+        {
+            if (!service.IsRunning)
+            {
+                journeyMicMonitorRoutine = null;
+                yield break;
+            }
+
+            yield return new WaitForSecondsRealtime(JourneyMicSampleSeconds);
+            baselineSum += service.RmsLinear;
+            baselineSamples++;
+        }
+
+        float baseline = baselineSamples > 0
+            ? (float)(baselineSum / baselineSamples)
+            : 0f;
+        baseline = Mathf.Max(baseline, JourneyMicMinRms);
+
+        int recentCapacity = Mathf.Max(
+            1,
+            Mathf.CeilToInt(MicrophoneLevelService.MicStartAverageSeconds / JourneyMicSampleSeconds));
+        var recent = new List<float>(recentCapacity);
+
+        while (journeyMicMonitorStarted
+            && !journeyMicLoudReady
+            && tripCount < 5)
+        {
+            if (!service.IsRunning || !service.StartRecording(JourneyMicWindowSeconds, false))
+            {
+                journeyMicMonitorRoutine = null;
+                yield break;
+            }
+
+            float windowStart = Time.unscaledTime;
+            float lastSampleTime = windowStart;
+            double windowSum = 0;
+            int windowSamples = 0;
+            float loudSeconds = 0f;
+            bool loud = false;
+            recent.Clear();
+
+            while (Time.unscaledTime - windowStart < JourneyMicWindowSeconds)
+            {
+                yield return new WaitForSecondsRealtime(JourneyMicSampleSeconds);
+
+                if (!service.IsRunning)
+                {
+                    service.ClearRecordingCache();
+                    journeyMicMonitorRoutine = null;
+                    yield break;
+                }
+
+                float now = Time.unscaledTime;
+                float deltaTime = Mathf.Max(0.01f, now - lastSampleTime);
+                lastSampleTime = now;
+
+                float rms = service.RmsLinear;
+                windowSum += rms;
+                windowSamples++;
+
+                recent.Add(rms);
+                while (recent.Count > recentCapacity)
+                    recent.RemoveAt(0);
+
+                float recentAverage = 0f;
+                for (int i = 0; i < recent.Count; i++)
+                    recentAverage += recent[i];
+                recentAverage /= Mathf.Max(1, recent.Count);
+
+                if (recentAverage > baseline * 2f)
+                    loudSeconds += deltaTime;
+                else
+                    loudSeconds = 0f;
+
+                if (loudSeconds >= MicrophoneLevelService.MicStartVerdictSeconds)
+                    loud = true;
+            }
+
+            float finishWait = 2f;
+            while (service.IsRecording && finishWait > 0f)
+            {
+                finishWait -= Time.unscaledDeltaTime;
+                yield return null;
+            }
+
+            if (loud && !service.IsRecording && service.HasRecording)
+            {
+                bool saved = service.TrySaveLastRecording(out string saveError);
+                journeyMicLoudReady = true;
+                if (saved)
+                {
+                    PlayerPrefs.SetInt(LoudAudioReadyKey, 1);
+                    PlayerPrefs.Save();
+                }
+                else if (!string.IsNullOrEmpty(saveError))
+                {
+                    DebugConsole.WriteLine("Could not save loud audio segment: " + saveError);
+                }
+
+                DebugConsole.WriteLine("Loud audio segment captured for the fifth journey.");
+                journeyMicMonitorRoutine = null;
+                yield break;
+            }
+
+            service.ClearRecordingCache();
+
+            if (loud)
+            {
+                journeyMicMonitorRoutine = null;
+                yield break;
+            }
+
+            float windowAverage = windowSamples > 0
+                ? (float)(windowSum / windowSamples)
+                : 0f;
+            if (windowAverage < baseline)
+                baseline = Mathf.Max(windowAverage, JourneyMicMinRms);
+        }
+
+        journeyMicMonitorRoutine = null;
     }
 
     static void PlayFifthRecording()
@@ -2561,17 +2897,28 @@ public class PetJourney : MonoBehaviour
             && body.gameObject.activeInHierarchy;
         if (!visible)
         {
-            if (moodWidget.gameObject.activeSelf)
-                moodWidget.gameObject.SetActive(false);
+            if (moodWidget.gameObject.activeSelf && !moodClosing)
+                StartMoodScale(false);
             return;
         }
 
         if (!moodWidget.gameObject.activeSelf)
+        {
             moodWidget.gameObject.SetActive(true);
+            moodScaleFactor = 0f;
+            moodClosing = false;
+            ApplyMoodScale();
+            StartMoodScale(true);
+        }
+        else if (moodClosing)
+        {
+            StartMoodScale(true);
+        }
 
         float homeScaleX = homeScale.x > 0.0001f ? homeScale.x : 0.5f;
         float scale = finalForm ? 1f : Mathf.Clamp01(pet.transform.localScale.x / homeScaleX);
-        moodWidget.localScale = Vector3.one * scale;
+        moodBaseScale = scale;
+        ApplyMoodScale();
 
         Camera cam = Camera.main;
         Canvas canvas = moodWidget.GetComponentInParent<Canvas>();
@@ -2598,6 +2945,59 @@ public class PetJourney : MonoBehaviour
         local.x = Mathf.Clamp(local.x, rect.xMin + halfWidth, rect.xMax - halfWidth);
         local.y = Mathf.Clamp(local.y, rect.yMin + height + 6f, rect.yMax - 6f);
         moodWidget.anchoredPosition = local - rect.center;
+    }
+
+    void StartMoodScale(bool open)
+    {
+        if (moodWidget == null)
+            return;
+
+        if (moodScaleRoutine != null)
+        {
+            StopCoroutine(moodScaleRoutine);
+            moodScaleRoutine = null;
+        }
+
+        if (moodWidget.gameObject.activeSelf)
+        {
+            moodClosing = !open;
+            moodScaleRoutine = StartCoroutine(AnimateMoodScale(open));
+        }
+    }
+
+    IEnumerator AnimateMoodScale(bool open)
+    {
+        float start = moodScaleFactor;
+        float target = open ? 1f : 0f;
+        float duration = open ? 0.18f : 0.14f;
+        float elapsed = 0f;
+
+        while (elapsed < duration)
+        {
+            elapsed += Time.unscaledDeltaTime;
+            float t = Mathf.Clamp01(elapsed / duration);
+            float eased = Mathf.SmoothStep(0f, 1f, t);
+            moodScaleFactor = Mathf.LerpUnclamped(start, target, eased);
+            ApplyMoodScale();
+            yield return null;
+        }
+
+        moodScaleFactor = target;
+        ApplyMoodScale();
+        moodClosing = false;
+        moodScaleRoutine = null;
+
+        if (!open && moodWidget != null)
+            moodWidget.gameObject.SetActive(false);
+    }
+
+    void ApplyMoodScale()
+    {
+        if (moodWidget == null)
+            return;
+
+        float factor = Mathf.Max(0f, moodScaleFactor);
+        moodWidget.localScale = Vector3.one * (moodBaseScale * factor);
     }
 
     void ShakeMood()

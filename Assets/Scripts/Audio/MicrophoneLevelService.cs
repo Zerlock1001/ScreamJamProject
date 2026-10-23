@@ -126,6 +126,7 @@ namespace ScreamJam.Audio
         private int _recordFramesWritten;
         private int _recordTargetFrames;
         private int _recordLastPosition;
+        private bool _recordPersist = true;
         private AudioClip _lastRecordingClip;
         private AudioSource _playbackSource;
         private AudioSource _monitorSource;
@@ -375,7 +376,7 @@ namespace ScreamJam.Audio
             UpdateMicStart(RmsLinear);
         }
 
-        public bool StartRecording(float seconds = -1f)
+        public bool StartRecording(float seconds = -1f, bool persist = true)
         {
             if (IsRecording)
                 return false;
@@ -390,6 +391,7 @@ namespace ScreamJam.Audio
             _recordBuffer = new float[_recordTargetFrames * _channels];
             _recordFramesWritten = 0;
             _recordLastPosition = Microphone.GetPosition(DeviceName);
+            _recordPersist = persist;
             IsRecording = true;
             return true;
         }
@@ -517,6 +519,15 @@ namespace ScreamJam.Audio
             _lastRecordingClip = AudioClip.Create("LastRecording", frames, channels, frequency, false);
             _lastRecordingClip.SetData(data, 0);
 
+            if (!_recordPersist)
+            {
+                Debug.Log(
+                    "Recording ready: " +
+                    (frames / (float)frequency).ToString("0.0", CultureInfo.InvariantCulture) +
+                    "s.");
+                return;
+            }
+
             try
             {
                 Directory.CreateDirectory(RecordingsDirectory);
@@ -529,6 +540,38 @@ namespace ScreamJam.Audio
             catch (Exception ex)
             {
                 Debug.LogError("Failed to save recording: " + ex.Message);
+            }
+        }
+
+        public bool TrySaveLastRecording(out string error)
+        {
+            error = null;
+            if (_lastRecordingClip == null)
+            {
+                error = "No recording found.";
+                return false;
+            }
+
+            try
+            {
+                int frames = _lastRecordingClip.samples;
+                int channels = _lastRecordingClip.channels;
+                int frequency = _lastRecordingClip.frequency;
+                var data = new float[frames * channels];
+                if (!_lastRecordingClip.GetData(data, 0))
+                {
+                    error = "Failed to read recording data.";
+                    return false;
+                }
+
+                Directory.CreateDirectory(RecordingsDirectory);
+                WriteWav(RecordingPath, data, channels, frequency);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return false;
             }
         }
 

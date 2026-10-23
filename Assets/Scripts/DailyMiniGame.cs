@@ -94,6 +94,9 @@ public class DailyMiniGame : MonoBehaviour
     bool inputLocked;
     bool hasStarted;
     bool windowTransitioning;
+    bool uiHiddenForEffect;
+    bool popupWasActiveBeforeEffect;
+    bool windowWasActiveBeforeEffect;
     int flagsPlaced;
     int revealedSafe;
     int explodedIndex = -1;
@@ -130,6 +133,110 @@ public class DailyMiniGame : MonoBehaviour
             return;
 
         instance.Dismiss();
+    }
+
+    public static void HideForEffect()
+    {
+        if (instance == null)
+            return;
+
+        instance.HideUiForEffect();
+    }
+
+    public static void ShowAfterEffect()
+    {
+        if (instance == null)
+            return;
+
+        instance.RestoreUiAfterEffect();
+    }
+
+    public static void ForgetEffectHide()
+    {
+        if (instance == null)
+            return;
+
+        instance.uiHiddenForEffect = false;
+        instance.popupWasActiveBeforeEffect = false;
+        instance.windowWasActiveBeforeEffect = false;
+    }
+
+    void HideUiForEffect()
+    {
+        if (uiHiddenForEffect)
+            return;
+
+        uiHiddenForEffect = true;
+        popupWasActiveBeforeEffect = popup != null && popup.activeSelf;
+        windowWasActiveBeforeEffect = window != null && window.activeSelf;
+
+        if (popupAnimRoutine != null)
+        {
+            StopCoroutine(popupAnimRoutine);
+            popupAnimRoutine = null;
+        }
+        if (popupHoverRoutine != null)
+        {
+            StopCoroutine(popupHoverRoutine);
+            popupHoverRoutine = null;
+        }
+        if (windowAnimRoutine != null)
+        {
+            StopCoroutine(windowAnimRoutine);
+            windowAnimRoutine = null;
+        }
+
+        windowTransitioning = false;
+        if (popup != null)
+            popup.SetActive(false);
+        if (window != null)
+            window.SetActive(false);
+    }
+
+    void RestoreUiAfterEffect()
+    {
+        if (!uiHiddenForEffect)
+            return;
+
+        uiHiddenForEffect = false;
+        bool showPopup = popupWasActiveBeforeEffect;
+        bool showWindow = windowWasActiveBeforeEffect;
+        popupWasActiveBeforeEffect = false;
+        windowWasActiveBeforeEffect = false;
+
+        if (showPopup && popup != null)
+        {
+            popup.SetActive(true);
+            if (popupRect != null)
+            {
+                popupRect.anchoredPosition = popupTargetPosition;
+                popupRect.localScale = Vector3.one * PopupBaseScale;
+            }
+            if (popupVisualRect != null)
+                popupVisualRect.localScale = Vector3.one;
+            if (popupSmileyRect != null)
+                popupSmileyRect.localScale = Vector3.one;
+            if (popupGroup != null)
+            {
+                popupGroup.alpha = 1f;
+                popupGroup.interactable = true;
+                popupGroup.blocksRaycasts = true;
+            }
+            SetPopupHover(false);
+        }
+
+        if (showWindow && window != null)
+        {
+            window.SetActive(true);
+            if (windowRect != null)
+                windowRect.localScale = Vector3.one;
+            if (windowGroup != null)
+            {
+                windowGroup.alpha = 1f;
+                windowGroup.interactable = true;
+                windowGroup.blocksRaycasts = true;
+            }
+        }
     }
 
     public static void RestorePendingPassword()
@@ -723,8 +830,7 @@ public class DailyMiniGame : MonoBehaviour
         flagged = new bool[Size * Size];
         adjacent = new int[Size * Size];
 
-        GenerateValidMines();
-        boardGenerated = true;
+        boardGenerated = false;
         gameFinished = false;
         gameLost = false;
         inputLocked = false;
@@ -747,28 +853,71 @@ public class DailyMiniGame : MonoBehaviour
         UpdateStatus();
     }
 
-    void GenerateValidMines()
+    void GenerateValidMines(int firstClickIndex)
     {
+        // The first clicked cell and all eight neighbors stay mine-free, so the
+        // first reveal always opens a connected area.
+        var allowed = new List<int>(Size * Size);
+        for (int i = 0; i < Size * Size; i++)
+        {
+            if (!IsWithinFirstClickArea(i, firstClickIndex))
+                allowed.Add(i);
+        }
+
         for (int attempt = 0; attempt < 4000; attempt++)
         {
-            var available = new List<int>(Size * Size);
-            for (int i = 0; i < Size * Size; i++)
-            {
-                mines[i] = false;
-                available.Add(i);
-            }
-
+            Array.Clear(mines, 0, mines.Length);
+            var pool = new List<int>(allowed);
             for (int i = 0; i < MineCount; i++)
             {
-                int pick = UnityEngine.Random.Range(0, available.Count);
-                mines[available[pick]] = true;
-                available.RemoveAt(pick);
+                int pick = UnityEngine.Random.Range(0, pool.Count);
+                mines[pool[pick]] = true;
+                pool.RemoveAt(pick);
             }
 
             ComputeAdjacent();
             if (BoardIsValid())
                 return;
         }
+
+        // Random generation is practically guaranteed to find a valid board,
+        // but exhaust the remaining combinations if it somehow does not.
+        if (TryFirstValidMineCombination(allowed))
+            return;
+
+        DebugConsole.WriteLine("Minesweeper could not generate a valid first-click board.");
+    }
+
+    bool TryFirstValidMineCombination(List<int> allowed)
+    {
+        int count = allowed.Count;
+        for (int a = 0; a < count - 4; a++)
+        for (int b = a + 1; b < count - 3; b++)
+        for (int c = b + 1; c < count - 2; c++)
+        for (int d = c + 1; d < count - 1; d++)
+        for (int e = d + 1; e < count; e++)
+        {
+            Array.Clear(mines, 0, mines.Length);
+            mines[allowed[a]] = true;
+            mines[allowed[b]] = true;
+            mines[allowed[c]] = true;
+            mines[allowed[d]] = true;
+            mines[allowed[e]] = true;
+            ComputeAdjacent();
+            if (BoardIsValid())
+                return true;
+        }
+
+        return false;
+    }
+
+    static bool IsWithinFirstClickArea(int index, int firstClickIndex)
+    {
+        int x = index % Size;
+        int y = index / Size;
+        int firstX = firstClickIndex % Size;
+        int firstY = firstClickIndex / Size;
+        return Math.Abs(x - firstX) <= 1 && Math.Abs(y - firstY) <= 1;
     }
 
     bool BoardIsValid()
@@ -852,8 +1001,10 @@ public class DailyMiniGame : MonoBehaviour
         if (!hasStarted)
         {
             hasStarted = true;
-            if (mines[index])
-                RelocateMine(index);
+            GenerateValidMines(index);
+            boardGenerated = true;
+            UpdateAllCells();
+            UpdateStatus();
         }
 
         if (mines[index])
@@ -899,29 +1050,9 @@ public class DailyMiniGame : MonoBehaviour
             UpdateStatus();
     }
 
-    void RelocateMine(int safeIndex)
-    {
-        mines[safeIndex] = false;
-        for (int attempt = 0; attempt < 100; attempt++)
-        {
-            int candidate = UnityEngine.Random.Range(0, Size * Size);
-            if (candidate == safeIndex || mines[candidate])
-                continue;
-
-            mines[candidate] = true;
-            ComputeAdjacent();
-            if (BoardIsValid())
-                return;
-
-            mines[candidate] = false;
-        }
-
-        ComputeAdjacent();
-    }
-
     void ToggleFlag(int index)
     {
-        if (inputLocked || revealed[index])
+        if (inputLocked || !hasStarted || revealed[index])
             return;
 
         flagged[index] = !flagged[index];

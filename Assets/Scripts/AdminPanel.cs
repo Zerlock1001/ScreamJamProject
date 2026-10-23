@@ -1,7 +1,10 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
+using ScreamJam.Debugging;
+using ScreamJam.Utility;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -16,6 +19,7 @@ public class AdminPanel : MonoBehaviour
     const string AdminName = "OcOm_Admin123";
     const string AdminRole = "ADMINISTRATOR // ROOT";
     const string ColorSequenceKey = "AdminPanel.ColorSequence";
+    const float TerminalScrollWheelStep = 34f;
 
     static readonly Color PanelColor = new Color(0.035f, 0.035f, 0.04f, 0.98f);
     static readonly Color PanelDark = new Color(0.012f, 0.012f, 0.015f, 1f);
@@ -51,6 +55,12 @@ public class AdminPanel : MonoBehaviour
     Text statusText;
     Text terminalText;
     RectTransform terminalViewport;
+    RectTransform terminalScrollTrack;
+    RectTransform terminalScrollThumb;
+    Image terminalScrollThumbImage;
+    float terminalScrollY;
+    float terminalScrollMax;
+    bool terminalFollowBottom = true;
     Coroutine outputRoutine;
     Coroutine verifyRoutine;
     bool verifying;
@@ -89,6 +99,46 @@ public class AdminPanel : MonoBehaviour
     {
         if (instance != null)
             instance.Hide();
+    }
+
+    public static bool IsOpen => instance != null && instance.root != null && instance.root.activeSelf;
+
+    public static void HideForEffect()
+    {
+        if (instance == null || instance.root == null)
+            return;
+
+        if (instance.animRoutine != null)
+        {
+            instance.StopCoroutine(instance.animRoutine);
+            instance.animRoutine = null;
+        }
+
+        instance.root.SetActive(false);
+    }
+
+    public static void ShowAfterEffect()
+    {
+        if (instance == null || instance.root == null)
+            return;
+
+        if (instance.animRoutine != null)
+        {
+            instance.StopCoroutine(instance.animRoutine);
+            instance.animRoutine = null;
+        }
+
+        instance.root.SetActive(true);
+        instance.root.transform.SetAsLastSibling();
+        instance.root.transform.localScale = Vector3.one;
+        if (instance.canvasGroup != null)
+        {
+            instance.canvasGroup.alpha = 1f;
+            instance.canvasGroup.interactable = true;
+            instance.canvasGroup.blocksRaycasts = true;
+        }
+
+        instance.StartCoroutine(instance.FocusPassword());
     }
 
     public static void ClearCachedSequence()
@@ -233,6 +283,10 @@ public class AdminPanel : MonoBehaviour
         if (terminalText == null)
             return;
 
+        terminalFollowBottom = true;
+        terminalScrollY = 0f;
+        terminalScrollMax = 0f;
+
         if (accessGranted)
             colorSequence = null;
         else if (colorSequence == null)
@@ -288,12 +342,89 @@ public class AdminPanel : MonoBehaviour
         if (terminalText == null || terminalViewport == null)
             yield break;
 
+        RecalculateTerminalScroll();
+        if (terminalFollowBottom)
+            terminalScrollY = terminalScrollMax;
+        ApplyTerminalScroll();
+    }
+
+    void RecalculateTerminalScroll()
+    {
+        if (terminalText == null || terminalViewport == null)
+            return;
+
         Canvas.ForceUpdateCanvases();
         RectTransform textRect = terminalText.rectTransform;
         float height = terminalText.preferredHeight;
         textRect.sizeDelta = new Vector2(0f, height);
-        float overflow = Mathf.Max(0f, height - terminalViewport.rect.height);
-        textRect.anchoredPosition = new Vector2(0f, overflow);
+        terminalScrollMax = Mathf.Max(0f, height - terminalViewport.rect.height);
+        terminalScrollY = Mathf.Clamp(terminalScrollY, 0f, terminalScrollMax);
+    }
+
+    void ApplyTerminalScroll()
+    {
+        if (terminalText != null)
+            terminalText.rectTransform.anchoredPosition = new Vector2(0f, terminalScrollY);
+        UpdateTerminalScrollbar();
+    }
+
+    void SetTerminalScrollNormalized(float normalized)
+    {
+        RecalculateTerminalScroll();
+        terminalScrollY = Mathf.Clamp01(normalized) * terminalScrollMax;
+        terminalFollowBottom = terminalScrollMax <= 0.01f
+            || terminalScrollY >= terminalScrollMax - 0.5f;
+        ApplyTerminalScroll();
+    }
+
+    void ScrollTerminalByWheel(float wheel)
+    {
+        if (Mathf.Abs(wheel) < 0.001f)
+            return;
+
+        RecalculateTerminalScroll();
+        terminalScrollY = Mathf.Clamp(
+            terminalScrollY - wheel * TerminalScrollWheelStep,
+            0f,
+            terminalScrollMax);
+        terminalFollowBottom = terminalScrollMax <= 0.01f
+            || terminalScrollY >= terminalScrollMax - 0.5f;
+        ApplyTerminalScroll();
+    }
+
+    void UpdateTerminalScrollbar()
+    {
+        if (terminalScrollTrack == null || terminalScrollThumb == null || terminalViewport == null)
+            return;
+
+        float trackHeight = terminalScrollTrack.rect.height;
+        if (trackHeight <= 0f)
+            return;
+
+        float viewHeight = terminalViewport.rect.height;
+        float contentHeight = terminalScrollMax + viewHeight;
+        float thumbHeight = trackHeight;
+        if (terminalScrollMax > 0.01f && contentHeight > 0.01f)
+        {
+            thumbHeight = Mathf.Clamp(
+                trackHeight * (viewHeight / contentHeight),
+                22f,
+                trackHeight);
+        }
+
+        terminalScrollThumb.sizeDelta = new Vector2(0f, thumbHeight);
+        float travel = Mathf.Max(0f, trackHeight - thumbHeight);
+        float normalized = terminalScrollMax > 0.01f
+            ? Mathf.Clamp01(terminalScrollY / terminalScrollMax)
+            : 0f;
+        terminalScrollThumb.anchoredPosition = new Vector2(0f, -normalized * travel);
+
+        if (terminalScrollThumbImage != null)
+        {
+            terminalScrollThumbImage.color = terminalScrollMax > 0.01f
+                ? new Color(0.72f, 0.72f, 0.75f, 0.90f)
+                : new Color(0.40f, 0.40f, 0.42f, 0.55f);
+        }
     }
 
     public static string CurrentPassword()
@@ -487,25 +618,32 @@ public class AdminPanel : MonoBehaviour
         {
             terminalText.text = prefix + "VERIFYING...\n" +
                 (accepted
-                    ? "<color=#2f8f57>[SUCCESS]</color> ACCESS GRANTED / " +
+                    ? "<color=#2f8f57>[SUCCESS]</color> ACCESS GRANTED\n" +
                       "<color=#2f8f57>WELCOME USER ADMIN_OcOm!</color>"
                     : "<color=#a33d3d>[WARN]</color> ACCESS DENIED");
             yield return ScrollTerminalToBottom();
         }
 
         if (!accepted)
+        {
             yield return new WaitForSecondsRealtime(0.55f);
+            verifying = false;
+            verifyRoutine = null;
+            if (passwordInput != null)
+                passwordInput.ActivateInputField();
+            PetCampaign.SayWrongPasswordHint();
+            yield break;
+        }
+
+        yield return new WaitForSecondsRealtime(1f);
 
         verifying = false;
         verifyRoutine = null;
-        accessGranted = accepted;
-        if (!accepted && passwordInput != null)
-            passwordInput.ActivateInputField();
+        accessGranted = true;
+        if (passwordInput != null)
+            passwordInput.DeactivateInputField();
 
-        if (accepted)
-            PetCampaign.TryAgree();
-        else
-            PetCampaign.SayWrongPasswordHint();
+        AdminAccessEffect.Play(PetCampaign.TryAgree);
     }
 
     static float EaseOutBack(float t)
@@ -655,7 +793,7 @@ public class AdminPanel : MonoBehaviour
         terminalViewport.anchorMin = Vector2.zero;
         terminalViewport.anchorMax = Vector2.one;
         terminalViewport.offsetMin = new Vector2(20f, 52f);
-        terminalViewport.offsetMax = new Vector2(-20f, -12f);
+        terminalViewport.offsetMax = new Vector2(-30f, -12f);
 
         var contentObject = new GameObject(
             "Output",
@@ -680,6 +818,46 @@ public class AdminPanel : MonoBehaviour
         textRect.pivot = new Vector2(0.5f, 1f);
         textRect.anchoredPosition = Vector2.zero;
         textRect.sizeDelta = Vector2.zero;
+
+        var wheel = terminal.gameObject.AddComponent<AdminTerminalScrollWheel>();
+        wheel.Scrolled = ScrollTerminalByWheel;
+
+        terminalScrollTrack = MakePanel("Scrollbar", terminal, new Color(0.11f, 0.11f, 0.13f, 0.95f));
+        terminalScrollTrack.anchorMin = new Vector2(1f, 0f);
+        terminalScrollTrack.anchorMax = new Vector2(1f, 1f);
+        terminalScrollTrack.pivot = new Vector2(1f, 1f);
+        terminalScrollTrack.offsetMin = new Vector2(-20f, 52f);
+        terminalScrollTrack.offsetMax = new Vector2(-10f, -12f);
+        var trackImage = terminalScrollTrack.GetComponent<Image>();
+        trackImage.raycastTarget = false;
+        var trackOutline = terminalScrollTrack.gameObject.AddComponent<Outline>();
+        trackOutline.effectColor = new Color(0.55f, 0.55f, 0.58f, 0.35f);
+        trackOutline.effectDistance = new Vector2(1f, -1f);
+
+        var thumbObject = new GameObject(
+            "ScrollThumb",
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(Image),
+            typeof(Outline));
+        thumbObject.transform.SetParent(terminalScrollTrack, false);
+        terminalScrollThumb = thumbObject.GetComponent<RectTransform>();
+        terminalScrollThumb.anchorMin = new Vector2(0f, 1f);
+        terminalScrollThumb.anchorMax = new Vector2(1f, 1f);
+        terminalScrollThumb.pivot = new Vector2(0.5f, 1f);
+        terminalScrollThumb.anchoredPosition = Vector2.zero;
+        terminalScrollThumb.sizeDelta = new Vector2(0f, 40f);
+        terminalScrollThumbImage = thumbObject.GetComponent<Image>();
+        terminalScrollThumbImage.color = new Color(0.72f, 0.72f, 0.75f, 0.90f);
+        terminalScrollThumbImage.raycastTarget = true;
+        var thumbOutline = thumbObject.GetComponent<Outline>();
+        thumbOutline.effectColor = new Color(0f, 0f, 0f, 0.55f);
+        thumbOutline.effectDistance = new Vector2(1f, -1f);
+
+        var thumbDrag = thumbObject.AddComponent<AdminPanelScrollbarDrag>();
+        thumbDrag.Track = terminalScrollTrack;
+        thumbDrag.Thumb = terminalScrollThumb;
+        thumbDrag.Scrolled = SetTerminalScrollNormalized;
 
         var passwordObject = new GameObject("Password", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(InputField), typeof(Outline));
         passwordObject.transform.SetParent(terminal, false);
@@ -846,5 +1024,468 @@ public class AdminPanel : MonoBehaviour
         if (font == null)
             font = Resources.GetBuiltinResource<Font>("Arial.ttf");
         return font;
+    }
+}
+
+public class AdminPanelScrollbarDrag : MonoBehaviour, IBeginDragHandler, IDragHandler
+{
+    public RectTransform Track;
+    public RectTransform Thumb;
+    public Action<float> Scrolled;
+
+    float dragStartLocalY;
+    float dragStartNormalized;
+
+    public void OnBeginDrag(PointerEventData eventData)
+    {
+        if (!TryGetLocalY(eventData, out dragStartLocalY))
+            return;
+
+        float travel = Travel;
+        dragStartNormalized = travel > 0.01f
+            ? Mathf.Clamp01(-Thumb.anchoredPosition.y / travel)
+            : 0f;
+    }
+
+    public void OnDrag(PointerEventData eventData)
+    {
+        float localY;
+        if (!TryGetLocalY(eventData, out localY))
+            return;
+
+        float travel = Travel;
+        if (travel <= 0.01f)
+            return;
+
+        float normalized = Mathf.Clamp01(
+            dragStartNormalized - (localY - dragStartLocalY) / travel);
+        if (Scrolled != null)
+            Scrolled(normalized);
+    }
+
+    float Travel
+    {
+        get
+        {
+            if (Track == null || Thumb == null)
+                return 0f;
+            return Mathf.Max(0f, Track.rect.height - Thumb.rect.height);
+        }
+    }
+
+    bool TryGetLocalY(PointerEventData eventData, out float localY)
+    {
+        localY = 0f;
+        if (Track == null)
+            return false;
+
+        Vector2 local;
+        if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                Track,
+                eventData.position,
+                eventData.pressEventCamera,
+                out local))
+            return false;
+
+        localY = local.y;
+        return true;
+    }
+}
+
+public class AdminTerminalScrollWheel : MonoBehaviour, IScrollHandler
+{
+    public Action<float> Scrolled;
+
+    public void OnScroll(PointerEventData eventData)
+    {
+        if (Scrolled != null)
+            Scrolled(eventData.scrollDelta.y);
+    }
+}
+
+public class AdminAccessEffect : MonoBehaviour
+{
+    const int GridSize = 3;
+    const float BlockGap = 1.5f;
+    const float TileDisplaySeconds = 3f;
+    const float TileShuffleStartRate = 3f;
+    const float TileShuffleEndRate = 24f;
+    const int TileSnowCount = 3;
+    const int TileBlackCount = 1;
+    const float NoiseRefreshSeconds = 1f / 60f;
+    const int NoiseSize = 96;
+
+    Action onFinished;
+    GameObject canvasRoot;
+    GameObject tilesRoot;
+    GameObject flashObject;
+    Image flashImage;
+    Texture2D screenshot;
+    Texture2D noiseTexture;
+    Color32[] noisePixels;
+    RawImage[] tileImages;
+    RectTransform[] tileRects;
+    bool moodHidden;
+    bool effectUiHidden;
+    bool phoneIconWasVisible;
+    bool adminWasOpen;
+    bool previewMode;
+
+    public static void Play(Action finished)
+    {
+        var host = new GameObject("AdminAccessEffect");
+        var effect = host.AddComponent<AdminAccessEffect>();
+        effect.onFinished = finished;
+        effect.previewMode = finished == null;
+        effect.StartCoroutine(effect.Run());
+    }
+
+    IEnumerator Run()
+    {
+        effectUiHidden = true;
+        moodHidden = true;
+        adminWasOpen = AdminPanel.IsOpen;
+        phoneIconWasVisible = PetPhone.PhoneIconVisible;
+
+        DebugConsole.CloseImmediate();
+        DailyMiniGame.HideForEffect();
+        PetJourney.SetMoodBarVisible(false, true);
+        PetPhone.SetPhoneIconVisible(false);
+        PetPhone.SetPhoneUiHidden(true);
+        PetJourney.SetGalleryHidden(true);
+        if (adminWasOpen)
+            AdminPanel.HideForEffect();
+
+        DesktopPetWindow.SetFullWindowRegion(true);
+        yield return null;
+
+        screenshot = DesktopScreenshotService.CaptureTexture(out _, out string error);
+        if (screenshot == null)
+            Debug.LogWarning("AdminAccessEffect screenshot failed: " + error);
+
+        BuildOverlay();
+        ShowFlash(Color.black);
+        yield return new WaitForSecondsRealtime(1f);
+
+        if (tilesRoot != null)
+            tilesRoot.SetActive(true);
+        if (flashObject != null)
+            flashObject.SetActive(false);
+        yield return DisplayTiles();
+
+        ShowFlash(Color.black);
+        yield return new WaitForSecondsRealtime(1f);
+
+        ShowFlash(Color.white);
+        yield return new WaitForSecondsRealtime(0.03f);
+
+        ShowFlash(Color.black);
+        yield return new WaitForSecondsRealtime(0.05f);
+
+        Finish();
+    }
+
+    void BuildOverlay()
+    {
+        canvasRoot = new GameObject(
+            "AdminAccessEffectCanvas",
+            typeof(RectTransform),
+            typeof(Canvas),
+            typeof(CanvasScaler),
+            typeof(GraphicRaycaster));
+        var canvas = canvasRoot.GetComponent<Canvas>();
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = 50000;
+
+        var scaler = canvasRoot.GetComponent<CanvasScaler>();
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ConstantPixelSize;
+        scaler.scaleFactor = 1f;
+
+        var backdropObject = new GameObject(
+            "Backdrop",
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(Image));
+        backdropObject.transform.SetParent(canvasRoot.transform, false);
+        var backdropRect = backdropObject.GetComponent<RectTransform>();
+        backdropRect.anchorMin = Vector2.zero;
+        backdropRect.anchorMax = Vector2.one;
+        backdropRect.offsetMin = Vector2.zero;
+        backdropRect.offsetMax = Vector2.zero;
+        var backdrop = backdropObject.GetComponent<Image>();
+        backdrop.color = Color.black;
+        backdrop.raycastTarget = true;
+
+        tilesRoot = new GameObject("Tiles", typeof(RectTransform));
+        tilesRoot.transform.SetParent(canvasRoot.transform, false);
+        var tilesRect = tilesRoot.GetComponent<RectTransform>();
+        tilesRect.anchorMin = Vector2.zero;
+        tilesRect.anchorMax = Vector2.one;
+        tilesRect.offsetMin = Vector2.zero;
+        tilesRect.offsetMax = Vector2.zero;
+
+        tileImages = new RawImage[GridSize * GridSize];
+        tileRects = new RectTransform[GridSize * GridSize];
+        noisePixels = new Color32[NoiseSize * NoiseSize];
+        noiseTexture = new Texture2D(NoiseSize, NoiseSize, TextureFormat.RGBA32, false);
+        noiseTexture.filterMode = FilterMode.Point;
+        noiseTexture.wrapMode = TextureWrapMode.Repeat;
+        noiseTexture.hideFlags = HideFlags.HideAndDontSave;
+        RefreshNoiseTexture();
+
+        for (int row = 0; row < GridSize; row++)
+        {
+            for (int column = 0; column < GridSize; column++)
+            {
+                var tileObject = new GameObject(
+                    "Tile_" + row + "_" + column,
+                    typeof(RectTransform),
+                    typeof(CanvasRenderer),
+                    typeof(RawImage));
+                tileObject.transform.SetParent(tilesRoot.transform, false);
+                var tileRect = tileObject.GetComponent<RectTransform>();
+                tileRect.anchorMin = new Vector2(
+                    (float)column / GridSize,
+                    1f - (float)(row + 1) / GridSize);
+                tileRect.anchorMax = new Vector2(
+                    (float)(column + 1) / GridSize,
+                    1f - (float)row / GridSize);
+                tileRect.offsetMin = new Vector2(BlockGap, BlockGap);
+                tileRect.offsetMax = new Vector2(-BlockGap, -BlockGap);
+
+                tileRect.localScale = Vector3.one;
+                tileRect.localRotation = Quaternion.identity;
+
+                var tile = tileObject.GetComponent<RawImage>();
+                tile.texture = screenshot != null ? screenshot : Texture2D.blackTexture;
+                tile.color = Color.white;
+                tile.uvRect = new Rect(0f, 0f, 1f, 1f);
+                tile.raycastTarget = false;
+
+                int index = row * GridSize + column;
+                tileImages[index] = tile;
+                tileRects[index] = tileRect;
+            }
+        }
+
+        tilesRoot.SetActive(false);
+
+        flashObject = new GameObject(
+            "Flash",
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(Image));
+        flashObject.transform.SetParent(canvasRoot.transform, false);
+        var flashRect = flashObject.GetComponent<RectTransform>();
+        flashRect.anchorMin = Vector2.zero;
+        flashRect.anchorMax = Vector2.one;
+        flashRect.offsetMin = Vector2.zero;
+        flashRect.offsetMax = Vector2.zero;
+        flashImage = flashObject.GetComponent<Image>();
+        flashImage.color = Color.black;
+        flashImage.raycastTarget = true;
+    }
+
+    IEnumerator DisplayTiles()
+    {
+        int snowCount = Mathf.Clamp(TileSnowCount, 0, tileImages.Length);
+        int blackCount = Mathf.Clamp(TileBlackCount, 0, tileImages.Length - snowCount);
+        var order = new List<int>(tileImages.Length);
+        for (int i = 0; i < tileImages.Length; i++)
+            order.Add(i);
+
+        for (int i = order.Count - 1; i > 0; i--)
+        {
+            int swap = UnityEngine.Random.Range(0, i + 1);
+            int held = order[i];
+            order[i] = order[swap];
+            order[swap] = held;
+        }
+
+        var snowTiles = new bool[tileImages.Length];
+        var blackTiles = new bool[tileImages.Length];
+        for (int i = 0; i < snowCount; i++)
+            snowTiles[order[i]] = true;
+        for (int i = 0; i < blackCount; i++)
+            blackTiles[order[snowCount + i]] = true;
+
+        for (int i = 0; i < tileImages.Length; i++)
+        {
+            RawImage tile = tileImages[i];
+            if (tile == null)
+                continue;
+
+            if (snowTiles[i])
+            {
+                tile.texture = noiseTexture;
+                tile.color = Color.white;
+            }
+            else if (blackTiles[i])
+            {
+                tile.texture = Texture2D.whiteTexture;
+                tile.color = Color.black;
+            }
+            else
+            {
+                tile.texture = screenshot != null ? screenshot : Texture2D.blackTexture;
+                tile.color = Color.white;
+            }
+        }
+
+        ShuffleTilePositions();
+
+        float startTime = Time.unscaledTime;
+        float nextShuffle = startTime + 1f / TileShuffleStartRate;
+        float nextNoiseRefresh = 0f;
+
+        while (true)
+        {
+            float elapsed = Time.unscaledTime - startTime;
+            if (elapsed >= TileDisplaySeconds)
+                break;
+
+            while (Time.unscaledTime >= nextShuffle)
+            {
+                ShuffleTilePositions();
+                float progress = Mathf.Clamp01((nextShuffle - startTime) / TileDisplaySeconds);
+                float rate = Mathf.Lerp(TileShuffleStartRate, TileShuffleEndRate, progress);
+                nextShuffle += 1f / Mathf.Max(0.01f, rate);
+            }
+
+            if (Time.unscaledTime >= nextNoiseRefresh)
+            {
+                RefreshNoiseTexture();
+                nextNoiseRefresh = Time.unscaledTime + NoiseRefreshSeconds;
+            }
+
+            yield return null;
+        }
+    }
+
+    void ShuffleTilePositions()
+    {
+        if (tileRects == null || tileRects.Length == 0)
+            return;
+
+        var slots = new List<int>(tileRects.Length);
+        for (int i = 0; i < tileRects.Length; i++)
+            slots.Add(i);
+
+        for (int i = slots.Count - 1; i > 0; i--)
+        {
+            int swap = UnityEngine.Random.Range(0, i + 1);
+            int held = slots[i];
+            slots[i] = slots[swap];
+            slots[swap] = held;
+        }
+
+        for (int i = 0; i < tileRects.Length; i++)
+        {
+            RectTransform rect = tileRects[i];
+            if (rect == null)
+                continue;
+
+            int slot = slots[i];
+            int row = slot / GridSize;
+            int column = slot % GridSize;
+            rect.anchorMin = new Vector2(
+                (float)column / GridSize,
+                1f - (float)(row + 1) / GridSize);
+            rect.anchorMax = new Vector2(
+                (float)(column + 1) / GridSize,
+                1f - (float)row / GridSize);
+            rect.offsetMin = new Vector2(BlockGap, BlockGap);
+            rect.offsetMax = new Vector2(-BlockGap, -BlockGap);
+        }
+    }
+
+    void RefreshNoiseTexture()
+    {
+        if (noiseTexture == null || noisePixels == null)
+            return;
+
+        for (int i = 0; i < noisePixels.Length; i++)
+        {
+            byte value = (byte)UnityEngine.Random.Range(0, 256);
+            noisePixels[i] = new Color32(value, value, value, 255);
+        }
+
+        noiseTexture.SetPixels32(noisePixels);
+        noiseTexture.Apply(false, false);
+    }
+
+    void ShowFlash(Color color)
+    {
+        if (flashObject != null)
+            flashObject.SetActive(true);
+        if (flashImage != null)
+            flashImage.color = color;
+    }
+
+    void Finish()
+    {
+        if (canvasRoot != null)
+        {
+            canvasRoot.SetActive(false);
+            Destroy(canvasRoot);
+            canvasRoot = null;
+        }
+
+        if (screenshot != null)
+        {
+            Destroy(screenshot);
+            screenshot = null;
+        }
+
+        if (noiseTexture != null)
+        {
+            Destroy(noiseTexture);
+            noiseTexture = null;
+        }
+
+        DesktopPetWindow.SetFullWindowRegion(false);
+        RestoreEffectUi();
+
+        Action done = onFinished;
+        onFinished = null;
+        Destroy(gameObject);
+        if (done != null)
+            done();
+    }
+
+    void RestoreEffectUi()
+    {
+        if (!effectUiHidden)
+            return;
+
+        effectUiHidden = false;
+        RestoreMood();
+        if (previewMode)
+            DailyMiniGame.ShowAfterEffect();
+        else
+            DailyMiniGame.ForgetEffectHide();
+        PetPhone.SetPhoneUiHidden(false);
+        PetJourney.SetGalleryHidden(false);
+        PetPhone.SetPhoneIconVisible(phoneIconWasVisible);
+        if (adminWasOpen)
+        {
+            adminWasOpen = false;
+            AdminPanel.ShowAfterEffect();
+        }
+    }
+
+    void RestoreMood()
+    {
+        if (!moodHidden)
+            return;
+
+        moodHidden = false;
+        PetJourney.SetMoodBarVisible(true);
+    }
+
+    void OnDestroy()
+    {
+        DesktopPetWindow.SetFullWindowRegion(false);
+        RestoreEffectUi();
     }
 }
