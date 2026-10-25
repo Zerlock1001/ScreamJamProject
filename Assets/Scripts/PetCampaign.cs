@@ -108,7 +108,7 @@ public class PetCampaign : MonoBehaviour
     bool armAgree;
     bool cultJoined;
     bool cultJoining;
-    int wrongPasswordHints;
+    int wrongPasswordAttempts;
     int secondAsks;
     bool retract;
     int feeds;
@@ -412,19 +412,31 @@ public class PetCampaign : MonoBehaviour
         DebugConsole.WriteLine("Agreed.");
     }
 
-    public static void SayWrongPasswordHint()
+    public static void SayWrongPasswordHint(string currentPassword)
     {
         PetCampaign campaign = Ensure();
         if (campaign == null)
             return;
+
+        int attempts = ++campaign.wrongPasswordAttempts;
+        if (attempts == 3)
+        {
+            PetDialogue.Say("At least you tried");
+            return;
+        }
+
+        if (attempts >= 4 && !string.IsNullOrEmpty(currentPassword))
+        {
+            PetDialogue.Say("You know the password is " + currentPassword + " right?");
+            return;
+        }
 
         string[] hints =
         {
             "We use ColSum Code System to design the passcode.",
             "The numbers of the numbers might matter."
         };
-        int index = campaign.wrongPasswordHints % hints.Length;
-        campaign.wrongPasswordHints++;
+        int index = (attempts - 1) % hints.Length;
         PetDialogue.Say(hints[index]);
     }
 

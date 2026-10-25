@@ -55,7 +55,7 @@ public class DailyMiniGame : MonoBehaviour
     const float PopupBaseScale = 1.2f;
     const float StatusWidth = 252f;
     const float StatusHeight = 52f;
-    const float HintHeight = 26f;
+    const float HintHeight = 34f;
     const float GridSize = 210f;
     const string CompletedStateKey = "DailyMiniGame.CompletedState";
 
@@ -423,7 +423,7 @@ public class DailyMiniGame : MonoBehaviour
         windowRect.anchorMax = new Vector2(1f, 1f);
         windowRect.pivot = new Vector2(1f, 1f);
         windowRect.anchoredPosition = windowHomePosition;
-        windowRect.sizeDelta = new Vector2(310.5f, 363f);
+        windowRect.sizeDelta = new Vector2(310.5f, 371f);
         windowGroup = window.GetComponent<CanvasGroup>();
         float contentHeight = StatusHeight + HintHeight + GridSize;
         float contentTop = (windowRect.sizeDelta.y - contentHeight) * 0.5f;
@@ -511,19 +511,26 @@ public class DailyMiniGame : MonoBehaviour
         Text colorHint = MakeText(
             "ColorHint",
             window.transform,
-            "<color=#5f8dff>1 \u25A0</color>    <color=#55c978>2 \u25A0</color>    <color=#e05a5a>3 \u25A0</color>",
-            16,
+            HintColorEntry(1, "#5f8dff") + "    "
+                + HintColorEntry(2, "#55c978") + "    "
+                + HintColorEntry(3, "#e05a5a"),
+            22,
             TextAnchor.MiddleCenter,
             new Color(0.16f, 0.16f, 0.18f, 1f));
         colorHint.fontStyle = FontStyle.Bold;
         colorHint.supportRichText = true;
+        colorHint.alignByGeometry = true;
+        colorHint.lineSpacing = 1f;
         colorHint.horizontalOverflow = HorizontalWrapMode.Overflow;
         colorHint.verticalOverflow = VerticalWrapMode.Overflow;
+        var hintOutline = colorHint.gameObject.AddComponent<Outline>();
+        hintOutline.effectColor = Color.black;
+        hintOutline.effectDistance = new Vector2(1f, -1f);
         var hintRect = colorHint.rectTransform;
         hintRect.anchorMin = new Vector2(0.5f, 1f);
         hintRect.anchorMax = new Vector2(0.5f, 1f);
-        hintRect.pivot = new Vector2(0.5f, 1f);
-        hintRect.anchoredPosition = new Vector2(0f, -(contentTop + StatusHeight));
+        hintRect.pivot = new Vector2(0.5f, 0.5f);
+        hintRect.anchoredPosition = new Vector2(0f, -(contentTop + StatusHeight + HintHeight * 0.5f));
         hintRect.sizeDelta = new Vector2(StatusWidth, HintHeight);
 
         var gridObject = new GameObject("Grid", typeof(RectTransform), typeof(Image), typeof(GridLayoutGroup));
@@ -1268,6 +1275,13 @@ public class DailyMiniGame : MonoBehaviour
             case 7: return new Color(0.06f, 0.06f, 0.06f, 1f);
             default: return new Color(0.28f, 0.28f, 0.28f, 1f);
         }
+    }
+
+    static string HintColorEntry(int number, string squareColor)
+    {
+        string numberColor = ColorUtility.ToHtmlStringRGB(NumberColor(number));
+        return "<size=22><color=#" + numberColor + ">" + number + "</color></size> "
+            + "<size=18><color=" + squareColor + ">\u25A0</color></size>";
     }
 
     void UpdateStatus()

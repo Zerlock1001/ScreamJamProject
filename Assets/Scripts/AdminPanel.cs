@@ -631,7 +631,7 @@ public class AdminPanel : MonoBehaviour
             verifyRoutine = null;
             if (passwordInput != null)
                 passwordInput.ActivateInputField();
-            PetCampaign.SayWrongPasswordHint();
+            PetCampaign.SayWrongPasswordHint(expected);
             yield break;
         }
 
