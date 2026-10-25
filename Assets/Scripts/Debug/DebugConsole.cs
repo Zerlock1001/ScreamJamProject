@@ -26,8 +26,11 @@ namespace ScreamJam.Debugging
         /// <summary>Default delay between starting the camera and capturing, in seconds.</summary>
         public static float CameraCaptureDelaySeconds = CameraCaptureService.DefaultCaptureDelaySeconds;
 
+        // Temporary testing switch. Set this to false before the public release.
+        private const bool EnableConsoleInPlayerBuilds = true;
+
         private static DebugConsole _instance;
-        private static bool ConsoleAvailable => Application.isEditor;
+        private static bool ConsoleAvailable => Application.isEditor || EnableConsoleInPlayerBuilds;
         private static readonly ConcurrentQueue<LogEntry> Pending = new ConcurrentQueue<LogEntry>();
         private static readonly Dictionary<string, ConsoleCommand> Commands =
             new Dictionary<string, ConsoleCommand>(StringComparer.OrdinalIgnoreCase);

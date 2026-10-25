@@ -55,8 +55,8 @@ public class DailyMiniGame : MonoBehaviour
     const float PopupBaseScale = 1.2f;
     const float StatusWidth = 252f;
     const float StatusHeight = 52f;
+    const float HintHeight = 26f;
     const float GridSize = 210f;
-    const float ContentGap = 8f;
     const string CompletedStateKey = "DailyMiniGame.CompletedState";
 
     static DailyMiniGame instance;
@@ -423,9 +423,9 @@ public class DailyMiniGame : MonoBehaviour
         windowRect.anchorMax = new Vector2(1f, 1f);
         windowRect.pivot = new Vector2(1f, 1f);
         windowRect.anchoredPosition = windowHomePosition;
-        windowRect.sizeDelta = new Vector2(310.5f, 345f);
+        windowRect.sizeDelta = new Vector2(310.5f, 363f);
         windowGroup = window.GetComponent<CanvasGroup>();
-        float contentHeight = StatusHeight + ContentGap + GridSize;
+        float contentHeight = StatusHeight + HintHeight + GridSize;
         float contentTop = (windowRect.sizeDelta.y - contentHeight) * 0.5f;
 
         var background = window.GetComponent<Image>();
@@ -508,13 +508,31 @@ public class DailyMiniGame : MonoBehaviour
         closeRect.sizeDelta = new Vector2(24f, 24f);
         closeButton.onClick.AddListener(CloseWindow);
 
+        Text colorHint = MakeText(
+            "ColorHint",
+            window.transform,
+            "<color=#5f8dff>1 \u25A0</color>    <color=#55c978>2 \u25A0</color>    <color=#e05a5a>3 \u25A0</color>",
+            16,
+            TextAnchor.MiddleCenter,
+            new Color(0.16f, 0.16f, 0.18f, 1f));
+        colorHint.fontStyle = FontStyle.Bold;
+        colorHint.supportRichText = true;
+        colorHint.horizontalOverflow = HorizontalWrapMode.Overflow;
+        colorHint.verticalOverflow = VerticalWrapMode.Overflow;
+        var hintRect = colorHint.rectTransform;
+        hintRect.anchorMin = new Vector2(0.5f, 1f);
+        hintRect.anchorMax = new Vector2(0.5f, 1f);
+        hintRect.pivot = new Vector2(0.5f, 1f);
+        hintRect.anchoredPosition = new Vector2(0f, -(contentTop + StatusHeight));
+        hintRect.sizeDelta = new Vector2(StatusWidth, HintHeight);
+
         var gridObject = new GameObject("Grid", typeof(RectTransform), typeof(Image), typeof(GridLayoutGroup));
         gridObject.transform.SetParent(window.transform, false);
         gridRoot = gridObject.GetComponent<RectTransform>();
         gridRoot.anchorMin = new Vector2(0.5f, 1f);
         gridRoot.anchorMax = new Vector2(0.5f, 1f);
         gridRoot.pivot = new Vector2(0.5f, 1f);
-        gridRoot.anchoredPosition = new Vector2(0f, -(contentTop + StatusHeight + ContentGap));
+        gridRoot.anchoredPosition = new Vector2(0f, -(contentTop + StatusHeight + HintHeight));
         gridRoot.sizeDelta = new Vector2(GridSize, GridSize);
         var gridBackground = gridObject.GetComponent<Image>();
         gridBackground.sprite = FlatSprite();
